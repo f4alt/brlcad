@@ -75,8 +75,8 @@ generate_shader(struct conversion_state* pstate, unsigned int mesh_idx)
         C_STRUCT aiMaterial* mat = pstate->scene->mMaterials[mat_idx];
 
         ret.shadername = mat->GetName().data;
-        if (ret.shadername[0] == 0)
-            ret.shadername = "plastic";
+        // if (ret.shadername[0] == 0)
+        //     ret.shadername = "plastic";
 
         /* get material data used for phong shading */
         C_STRUCT aiColor3D diff (-1);
@@ -89,14 +89,14 @@ generate_shader(struct conversion_state* pstate, unsigned int mesh_idx)
         mat->Get(AI_MATKEY_SHININESS_STRENGTH, s);
 
         /* TODO create shader arg string */
-        std::string fmt_args = "{";
-        if (s >= 0) {
-            fmt_args.append("sh ");
-            fmt_args.append(std::to_string(s));
-        }
-        fmt_args.append("}");
+        // std::string fmt_args = "{";
+        // if (s >= 0) {
+        //     fmt_args.append("sh ");
+        //     fmt_args.append(std::to_string(s));
+        // }
+        // fmt_args.append("}");
 
-        ret.shaderargs = fmt_args.c_str();
+        // ret.shaderargs = fmt_args.c_str();
     }
 
     /* set the color of the face using the first vertex color data we 
@@ -249,10 +249,12 @@ handle_node(struct conversion_state* pstate, const C_STRUCT aiNode* curr, struct
 HIDDEN void
 convert_input(struct conversion_state* pstate)
 {
-    /* we are taking one of the postprocessing presets to avoid
-     * spelling out 20+ single postprocessing flags here. 
+    /* we are taking one of the postprocessing presets
+     * we must keep seemingly redundant materials because we are storing
+     * brlcad recognizable shader names in assimp_write and assimp will
+     * exclude them otherwise
      */
-    pstate->scene = aiImportFile(pstate->input_file.c_str(), aiProcessPreset_TargetRealtime_MaxQuality);
+    pstate->scene = aiImportFile(pstate->input_file.c_str(), aiProcessPreset_TargetRealtime_MaxQuality & ~aiProcess_RemoveRedundantMaterials);
 
     /* we know there is atleast one root node if conversion is successful */
     if (!pstate->scene || !pstate->scene->mRootNode)
