@@ -231,6 +231,7 @@ run_comparison() {
 
     # if we don't have any model dirs requested, default to the release share/db/chess set for now
     MODEL_DIRS="${MODEL_DIRS:-$RELEASE_PREFIX/share/db/chess}"
+    export MODEL_DIRS
 
     log_test_env
 
