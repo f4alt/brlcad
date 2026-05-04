@@ -103,6 +103,11 @@ jobs:
       RAYS_PER_VIEW: "1000"
       PERF_SECONDS: "3"
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: brlcad
+
       - name: Download BRL-CAD comparison package
         uses: actions/download-artifact@v4
         with:
@@ -116,8 +121,8 @@ jobs:
 
           # run the compare script
           script_path="brlcad/.github/helper-scripts/rtcmp_runner.sh"
-          chmod +x $script_path
-          $script_path "$compare_pkg" "$BRLCAD_RELEASE_PACKAGE_URL"
+          chmod +x "$script_path"
+          "$script_path" "$compare_pkg" "$BRLCAD_RELEASE_PACKAGE_URL"
 
       - name: Upload rtcmp results
         if: always()
