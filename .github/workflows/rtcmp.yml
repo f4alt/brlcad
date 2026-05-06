@@ -97,6 +97,7 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
 
       RESULTS_ROOT: ${{ github.workspace }}/perf-results
+
       ###
       # Lane aggregation config.
       # Each lane maps to:
@@ -104,25 +105,33 @@ jobs:
       #   <UPPER_LANE>_STATUS
       #   <UPPER_LANE>_SUMMARY
       ###
-      PERF_LANES: "rtcmp_generic"
+      PERF_LANES: "rtcmp_prims rtcmp_generic"
 
       RUN_RTCMP_GENERIC: "1"
       RTCMP_GENERIC_DESCRIPTION: "run rtcmp comparison and performance tests across general models"
       RTCMP_GENERIC_STATUS: "0"
       RTCMP_GENERIC_SUMMARY: ${{ github.workspace }}/perf-results/rtcmp-generic/artifacts/summary.csv
-
       # rtcmp_generic comparison knobs
       BRLCAD_RELEASE_PACKAGE_URL: https://github.com/BRL-CAD/brlcad/releases/download/rel-7-42-0/BRL-CAD_7.42.0_Linux_x86_64.tar.gz
       RTCMP_WORK_DIR: ${{ github.workspace }}/rtcmp-generic-work
-      RTCMP_RESULTS_DIR: "${{ github.workspace }}/perf-results/rtcmp-generic/artifacts"
+      RTCMP_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-generic/artifacts
       RAYS_PER_VIEW: "100"
       PERF_SECONDS: "1"
       PERF_FAIL_THRESHOLD_PCT: "20"
-      #MODEL_DIRS=""
-      #NUM_CPUS: "0"
-      #PERF_MAX_MEMORY: "0"
-      #CLEANUP_OUTPUT_ARTIFACTS: "1"
-      #LOG_LEVEL: "0"
+      # MODEL_DIRS intentionally omitted for now; generic runner can use fallback.
+      # NUM_CPUS: "0"
+      # PERF_MAX_MEMORY: "0"
+      # CLEANUP_OUTPUT_ARTIFACTS: "1"
+      # LOG_LEVEL: "0"
+
+      RUN_RTCMP_PRIMS: "1"
+      RTCMP_PRIMS_DESCRIPTION: "prims"
+      RTCMP_PRIMS_STATUS: "0"
+      RTCMP_PRIMS_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-prims
+      RTCMP_PRIMS_SUMMARY: ${{ github.workspace }}/perf-results/rtcmp-prims/prims_summary.csv
+      # rtcmp_prims knobs
+      PRIMS_PERF_SECONDS: "1"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -143,6 +152,7 @@ jobs:
           # make sure dirs exist
           mkdir -p "$RTCMP_RESULTS_DIR"
 
+          status=0
           # run the compare script?
           if [ "$RUN_RTCMP_GENERIC" = "1" ]; then
             script_path="brlcad/.github/helper-scripts/rtcmp_generic_runner.sh"
@@ -159,6 +169,50 @@ jobs:
 
           echo "RTCMP_GENERIC_STATUS=$status" >> "$GITHUB_ENV"
           echo "RTCMP_GENERIC_SUMMARY=$RTCMP_RESULTS_DIR/summary.csv" >> "$GITHUB_ENV"
+
+          # Do not exit with $status here; let aggregation run first.
+          exit 0
+
+      - name: Run rtcmp primitive performance
+        run: |
+          mkdir -p "$RTCMP_PRIMS_RESULTS_DIR"
+
+          status=0
+
+          if [ "$RUN_RTCMP_PRIMS" = "1" ]; then
+            script_path="brlcad/.github/helper-scripts/rtcmp_prims_runner.sh"
+            test -f "$script_path"
+            chmod +x "$script_path"
+
+            # cheat for now: rtcmp_generic ran first, so reuse its compare build
+            release_mged="$(find "$RTCMP_WORK_DIR/brlcad-release" -type f -path '*/bin/mged' | sort | head -n 1)"
+            test -n "$release_mged"
+            brl_prefix="$(dirname "$(dirname "$release_mged")")"
+            prims_g="$brl_prefix/share/db/primitives.g"
+            # FIXME: this will need to be rtcmp-build-compare/ when we revert the only release stub
+            compare_rtcmp="$RTCMP_WORK_DIR/rtcmp-build-release/rtcmp"
+
+            test -x "$release_mged"
+            test -f "$prims_g"
+            test -x "$compare_rtcmp"
+
+            echo "Using MGED: $release_mged"
+            echo "Using primitives DB: $prims_g"
+            echo "Using rtcmp: $compare_rtcmp"
+
+            set +e
+            RTCMP_PRIMS_G="$prims_g" \
+            MGED="$release_mged" \
+            RTCMP="$compare_rtcmp" \
+            OUTDIR="$RTCMP_PRIMS_RESULTS_DIR" \
+            PERF_SECONDS="$PRIMS_PERF_SECONDS" \
+            "$script_path"
+            status=$?
+            set -e
+          fi
+
+          echo "RTCMP_PRIMS_STATUS=$status" >> "$GITHUB_ENV"
+          echo "RTCMP_PRIMS_SUMMARY=$RTCMP_PRIMS_RESULTS_DIR/prims_summary.csv" >> "$GITHUB_ENV"
 
           # Do not exit with $status here; let aggregation run first.
           exit 0
