@@ -97,7 +97,19 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
 
       RESULTS_ROOT: ${{ github.workspace }}/perf-results
+      ###
+      # Lane aggregation config.
+      # Each lane maps to:
+      #   <UPPER_LANE>_DESCRIPTION
+      #   <UPPER_LANE>_STATUS
+      #   <UPPER_LANE>_SUMMARY
+      ###
+      PERF_LANES: "rtcmp_generic"
+
       RUN_RTCMP_GENERIC: "1"
+      RTCMP_GENERIC_DESCRIPTION: "run rtcmp comparison and performance tests across general models"
+      RTCMP_GENERIC_STATUS: "0"
+      RTCMP_GENERIC_SUMMARY: ${{ github.workspace }}/perf-results/rtcmp-generic/artifacts/summary.csv
 
       # rtcmp_generic comparison knobs
       BRLCAD_RELEASE_PACKAGE_URL: https://github.com/BRL-CAD/brlcad/releases/download/rel-7-42-0/BRL-CAD_7.42.0_Linux_x86_64.tar.gz
@@ -136,11 +148,20 @@ jobs:
             script_path="brlcad/.github/helper-scripts/rtcmp_generic_runner.sh"
             test -f "$script_path"
             chmod +x "$script_path"
+
+            # For current lightweight wiring tests, compare release package to itself.
+            # Later, replace first argument with "$compare_pkg" from the linux_bext artifact.
+            set +e
             "$script_path" "$BRLCAD_RELEASE_PACKAGE_URL" "$BRLCAD_RELEASE_PACKAGE_URL"
-            # capture exit code
-            echo "RTCMP_GENERIC_STATUS=$?" >> $GITHUB_ENV
-            echo "RTCMP_GENERIC_SUMMARY=$RTCMP_RESULTS_DIR/summary.csv" >> $GITHUB_ENV
+            status=$?
+            set -e
           fi
+
+          echo "RTCMP_GENERIC_STATUS=$status" >> "$GITHUB_ENV"
+          echo "RTCMP_GENERIC_SUMMARY=$RTCMP_RESULTS_DIR/summary.csv" >> "$GITHUB_ENV"
+
+          # Do not exit with $status here; let aggregation run first.
+          exit 0
 
       - name: Summarize results
         if: always()
@@ -149,9 +170,6 @@ jobs:
           test -f "$script_path"
           chmod +x "$script_path"
           "$script_path"
-
-          # link rtcmp_generic output
-          export RTCMP_GENERIC_SUMMARY="$RTCMP_RESULTS_DIR/summary.csv"
 
           if [ -f "$RESULTS_ROOT/dashboard/summary.md" ]; then
             cat "$RESULTS_ROOT/dashboard/summary.md" >> "$GITHUB_STEP_SUMMARY"
