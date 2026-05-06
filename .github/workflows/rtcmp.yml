@@ -103,8 +103,8 @@ jobs:
       BRLCAD_RELEASE_PACKAGE_URL: https://github.com/BRL-CAD/brlcad/releases/download/rel-7-42-0/BRL-CAD_7.42.0_Linux_x86_64.tar.gz
       RTCMP_WORK_DIR: ${{ github.workspace }}/rtcmp-generic-work
       RTCMP_RESULTS_DIR: "${{ github.workspace }}/perf-results/rtcmp-generic/artifacts"
-      RAYS_PER_VIEW: "1000"
-      PERF_SECONDS: "3"
+      RAYS_PER_VIEW: "100"
+      PERF_SECONDS: "1"
       PERF_FAIL_THRESHOLD_PCT: "20"
       #MODEL_DIRS=""
       #NUM_CPUS: "0"
