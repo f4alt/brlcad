@@ -96,7 +96,7 @@ write_summary_md() {
 | Total cases | $total_cases |
 | Comparison failures | $compare_fails |
 | Performance threshold failures | $perf_fails |
-| Lane exit status | $GENERIC_STATUS |
+| Lane exit status | $RTCMP_GENERIC_STATUS |
 
 ## Artifacts
 
@@ -121,7 +121,7 @@ write_run_json() {
   "overall_status": "$overall",
   "lanes": {
     "rtcmp_generic": {
-      "status_code": $GENERIC_STATUS,
+      "status_code": $RTCMP_GENERIC_STATUS,
       "total_cases": $total_cases,
       "compare_failures": $compare_fails,
       "perf_failures": $perf_fails,
@@ -140,7 +140,7 @@ main() {
     perf_fails="$(count_perf_fails "$RTCMP_GENERIC_SUMMARY")"
 
     overall="PASS"
-    if [ "$GENERIC_STATUS" -ne 0 ] || [ "$compare_fails" -ne 0 ] || [ "$perf_fails" -ne 0 ]; then
+    if [ "$RTCMP_GENERIC_STATUS" -ne 0 ] || [ "$compare_fails" -ne 0 ] || [ "$perf_fails" -ne 0 ]; then
         overall="FAIL"
     fi
 
