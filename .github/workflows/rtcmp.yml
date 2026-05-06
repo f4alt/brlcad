@@ -84,8 +84,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  linux_rtcmp:
-    name: rtcmp runner
+  linux_performance:
+    name: Performance Runner
     needs: [linux_bext]
     runs-on: ubuntu-latest
     strategy:
@@ -95,18 +95,30 @@ jobs:
       github.event_name == 'workflow_dispatch'
     env:
       DEBIAN_FRONTEND: noninteractive
-      RTCMP_WORK_DIR: ${{ github.workspace }}/rtcmp-work
-      RTCMP_RESULTS_DIR: ${{ github.workspace }}/rtcmp-results
 
-      # comparison knobs
+      RESULTS_ROOT: ${{ github.workspace }}/perf-results
+      RUN_RTCMP_GENERIC: "1"
+
+      # rtcmp_generic comparison knobs
       BRLCAD_RELEASE_PACKAGE_URL: https://github.com/BRL-CAD/brlcad/releases/download/rel-7-42-0/BRL-CAD_7.42.0_Linux_x86_64.tar.gz
+      RTCMP_WORK_DIR: ${{ github.workspace }}/rtcmp-generic-work
+      RTCMP_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-generic/artifacts
       RAYS_PER_VIEW: "1000"
       PERF_SECONDS: "3"
+      PERF_FAIL_THRESHOLD_PCT: "20"
+      #MODEL_DIRS=""
+      #NUM_CPUS: "0"
+      #PERF_MAX_MEMORY: "0"
+      #CLEANUP_OUTPUT_ARTIFACTS: "1"
+      #LOG_LEVEL: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           path: brlcad
+
+      #TODO: do we need this?
+      #- name: Install dependencies
 
       - name: Download BRL-CAD comparison package
         uses: actions/download-artifact@v4
@@ -114,20 +126,35 @@ jobs:
           name: brlcad-main-linux-package
           path: main-package
 
-      - name: Run rtcmp scheduled comparison
+      - name: Run rtcmp generic comparison
         run: |
           compare_pkg="$(find main-package -type f \( -name '*.tar.gz' -o -name '*.tgz' \) | sort | head -n 1)"
           test -n "$compare_pkg"
 
-          # run the compare script
-          script_path="brlcad/.github/helper-scripts/rtcmp_runner.sh"
-          chmod +x "$script_path"
-          "$script_path" "$compare_pkg" "$BRLCAD_RELEASE_PACKAGE_URL"
+          # run the compare script?
+          if [ "$RUN_RTCMP_GENERIC" = "1" ]; then
+            script_path="brlcad/.github/helper-scripts/rtcmp_runner.sh"
+            test -f "$script_path"
+            chmod +x "$script_path"
+            "$script_path" "$compare_pkg" "$BRLCAD_RELEASE_PACKAGE_URL"
+          fi
 
+      - name: Summarize results
+        if: always()
+        run: |
+          script_path="brlcad/.github/helper-scripts/performance_output_aggregator.sh"
+          test -f "$script_path"
+          chmod +x "$script_path"
+          "$script_path"
+
+          if [ -f "$RESULTS_ROOT/dashboard/summary.md" ]; then
+            cat "$RESULTS_ROOT/dashboard/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+        
       - name: Upload rtcmp results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rtcmp-results
-          path: rtcmp-results/
+          name: performance-results
+          path: perf-results
           retention-days: 7

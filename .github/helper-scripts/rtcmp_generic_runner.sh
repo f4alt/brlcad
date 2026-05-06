@@ -117,23 +117,6 @@ prepare_dirs() {
 download_release() {
     log_section "Resolving release package"
 
-    if [[ "$RELEASE_URL" == http://* || "$RELEASE_URL" == https://* ]]; then
-        log "Downloading release package: $RELEASE_URL"
-
-        curl -L --fail --retry 3 --output "$RELEASE_PACKAGE" "$RELEASE_URL"
-
-        [ -f "$RELEASE_PACKAGE" ] || log_error "Release package download failed: $RELEASE_URL"
-    else
-        log "Using local release package: $RELEASE_URL"
-
-        RELEASE_PACKAGE="$(abs_path "$RELEASE_URL")"
-
-        [ -f "$RELEASE_PACKAGE" ] || log_error "Release package does not exist: $RELEASE_PACKAGE"
-    fi
-}
-download_release() {
-    log_section "Downloading release package"
-
     # see if we have a url or a local copy
     if [[ "$RELEASE_URL" == http* ]]; then
     	curl -L --fail --retry 3 --output "$RELEASE_PACKAGE" "$RELEASE_URL"
