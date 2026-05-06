@@ -8,9 +8,9 @@ log_error() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 RESULTS_ROOT="${RESULTS_ROOT:-$PWD/perf-results}"
 DASHBOARD_DIR="$RESULTS_ROOT/dashboard"
-RTCMP_GENERIC_DIR="$RESULTS_ROOT/rtcmp-generic"
-RTCMP_GENERIC_SUMMARY="$RTCMP_GENERIC_DIR/summary.csv"
 
+# rtcmp_generic runs
+RTCMP_GENERIC_SUMMARY="${RTCMP_GENERIC_SUMMARY:-$RESULTS_ROOT/summary.csv"
 RTCMP_GENERIC_STATUS="${RTCMP_GENERIC_STATUS:-0}"
 
 mkdir -p "$DASHBOARD_DIR"
@@ -135,9 +135,9 @@ EOF
 main() {
     log_section "Aggregating performance tracker results"
 
-    total_cases="$(count_csv_rows "$GENERIC_SUMMARY")"
-    compare_fails="$(count_compare_fails "$GENERIC_SUMMARY")"
-    perf_fails="$(count_perf_fails "$GENERIC_SUMMARY")"
+    total_cases="$(count_csv_rows "$RTCMP_GENERIC_SUMMARY")"
+    compare_fails="$(count_compare_fails "$RTCMP_GENERIC_SUMMARY")"
+    perf_fails="$(count_perf_fails "$RTCMP_GENERIC_SUMMARY")"
 
     overall="PASS"
     if [ "$GENERIC_STATUS" -ne 0 ] || [ "$compare_fails" -ne 0 ] || [ "$perf_fails" -ne 0 ]; then

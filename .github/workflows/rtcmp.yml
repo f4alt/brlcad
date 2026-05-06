@@ -137,6 +137,9 @@ jobs:
             test -f "$script_path"
             chmod +x "$script_path"
             "$script_path" "$BRLCAD_RELEASE_PACKAGE_URL" "$BRLCAD_RELEASE_PACKAGE_URL"
+            # capture exit code
+            echo "RTCMP_GENERIC_STATUS=$?" >> $GITHUB_ENV
+            echo "RTCMP_GENERIC_SUMMARY=$RTCMP_RESULTS_DIR/summary.csv" >> $GITHUB_ENV
           fi
 
       - name: Summarize results
@@ -146,6 +149,9 @@ jobs:
           test -f "$script_path"
           chmod +x "$script_path"
           "$script_path"
+
+          # link rtcmp_generic output
+          export RTCMP_GENERIC_SUMMARY="$RTCMP_RESULTS_DIR/summary.csv"
 
           if [ -f "$RESULTS_ROOT/dashboard/summary.md" ]; then
             cat "$RESULTS_ROOT/dashboard/summary.md" >> "$GITHUB_STEP_SUMMARY"
