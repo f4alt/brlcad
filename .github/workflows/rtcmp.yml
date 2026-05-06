@@ -102,7 +102,7 @@ jobs:
       # rtcmp_generic comparison knobs
       BRLCAD_RELEASE_PACKAGE_URL: https://github.com/BRL-CAD/brlcad/releases/download/rel-7-42-0/BRL-CAD_7.42.0_Linux_x86_64.tar.gz
       RTCMP_WORK_DIR: ${{ github.workspace }}/rtcmp-generic-work
-      RTCMP_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-generic/artifacts
+      RTCMP_RESULTS_DIR: "${{ github.workspace }}/perf-results/rtcmp-generic/artifacts"
       RAYS_PER_VIEW: "1000"
       PERF_SECONDS: "3"
       PERF_FAIL_THRESHOLD_PCT: "20"
@@ -128,6 +128,9 @@ jobs:
 
       - name: Run rtcmp generic comparison
         run: |
+          # make sure dirs exist
+          mkdir -p "$RTCMP_RESULTS_DIR"
+
           # run the compare script?
           if [ "$RUN_RTCMP_GENERIC" = "1" ]; then
             script_path="brlcad/.github/helper-scripts/rtcmp_generic_runner.sh"
