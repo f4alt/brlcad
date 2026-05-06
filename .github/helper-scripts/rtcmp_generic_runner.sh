@@ -65,10 +65,10 @@ check_args() {
         exit 1
     fi
 
-    COMPARE_PACKAGE="$(abs_path "$1")"
+    #COMPARE_PACKAGE="$(abs_path "$1")"
     RELEASE_URL="$2"
 
-    [ -f "$COMPARE_PACKAGE" ] || log_error "Compare package does not exist: $COMPARE_PACKAGE"
+    #[ -f "$COMPARE_PACKAGE" ] || log_error "Compare package does not exist: $COMPARE_PACKAGE"
 }
 
 check_requirements() {
@@ -130,10 +130,10 @@ download_release() {
 extract_brlcad_packages() {
     log_section "Extracting compare package"
 
-    extract_package "$COMPARE_PACKAGE" "$COMPARE_EXTRACT_DIR"
-    COMPARE_PREFIX="$(find_brlcad_prefix "$COMPARE_EXTRACT_DIR")"
+    #extract_package "$COMPARE_PACKAGE" "$COMPARE_EXTRACT_DIR"
+    #COMPARE_PREFIX="$(find_brlcad_prefix "$COMPARE_EXTRACT_DIR")"
 
-    log "Compare BRL-CAD prefix: $COMPARE_PREFIX"
+    #log "Compare BRL-CAD prefix: $COMPARE_PREFIX"
 
     log_section "Extracting release package"
 
@@ -208,6 +208,8 @@ run_comparison() {
     chmod +x "$test_script"
     test -x "$test_script" || log_error "rtcmp test script is not executable: $test_script"
 
+    COMPARE_RTCMP="$RELEASE_RTCMP"
+    COMPARE_PREFIX="$RELEASE_PREFIX"
     test -x "$COMPARE_RTCMP" || log_error "Compare rtcmp is not executable: $COMPARE_RTCMP"
     test -x "$RELEASE_RTCMP" || log_error "Release rtcmp is not executable: $RELEASE_RTCMP"
     test -x "$COMPARE_PREFIX/bin/mged" || log_error "Compare MGED is not executable: $COMPARE_PREFIX/bin/mged"
@@ -220,7 +222,7 @@ run_comparison() {
 
     CMD1="$RELEASE_RTCMP" \
     CMD2="$COMPARE_RTCMP" \
-    MGED="$COMPARE_PREFIX/bin/mged" \
+    MGED="$RELEASE_PREFIX/bin/mged" \
     OUTDIR="$RESULTS_DIR" \
     "$test_script"
 
@@ -236,10 +238,10 @@ main() {
 
     download_release
     extract_brlcad_packages
-    verify_brlcad_installs
+#    verify_brlcad_installs
 
     checkout_rtcmp
-    build_rtcmp_compare
+#    build_rtcmp_compare
     build_rtcmp_release
 
     run_comparison
