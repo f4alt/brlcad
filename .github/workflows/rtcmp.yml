@@ -100,48 +100,46 @@ jobs:
 
       ###
       # Lane aggregation config.
-      # Each lane maps to:
-      #   <UPPER_LANE>_DESCRIPTION
-      #   <UPPER_LANE>_STATUS
-      #   <UPPER_LANE>_SUMMARY
+      # Each lane is expected to map to:
+      #   <LANE>_DESCRIPTION    "string"
+      #   <LANE>_STATUS         PASS | FAIL | SKIP
+      #   <LANE>_SUMMARY        path/to/summary/CSV
       ###
       PERF_LANES: "benchmark rtcmp_prims rtcmp_generic"
 
-      RUN_RTCMP_GENERIC: "1"
+      RTCMP_GENERIC_ENABLED: "1"
       RTCMP_GENERIC_DESCRIPTION: "run rtcmp comparison and performance tests across general models"
-      RTCMP_GENERIC_STATUS: "0"
-      RTCMP_GENERIC_SUMMARY: ${{ github.workspace }}/perf-results/rtcmp-generic/artifacts/summary.csv
-      # rtcmp_generic comparison knobs
-      BRLCAD_RELEASE_PACKAGE_URL: https://github.com/BRL-CAD/brlcad/releases/download/rel-7-42-0/BRL-CAD_7.42.0_Linux_x86_64.tar.gz
-      RTCMP_WORK_DIR: ${{ github.workspace }}/rtcmp-generic-work
-      RTCMP_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-generic/artifacts
-      RAYS_PER_VIEW: "100"
-      PERF_SECONDS: "1"
-      PERF_FAIL_THRESHOLD_PCT: "20"
-      # MODEL_DIRS intentionally omitted for now; generic runner can use fallback.
-      # NUM_CPUS: "0"
-      # PERF_MAX_MEMORY: "0"
-      # CLEANUP_OUTPUT_ARTIFACTS: "1"
-      # LOG_LEVEL: "0"
+      RTCMP_GENERIC_STATUS: "SKIP"
+      RTCMP_GENERIC_SUMMARY: ${{ github.workspace }}/perf-results/rtcmp-generic/summary.csv
+      # rtcmp_generic knobs
+      RG_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-generic
+      RG_RELEASE_PACKAGE: https://github.com/BRL-CAD/brlcad/releases/download/rel-7-42-0/BRL-CAD_7.42.0_Linux_x86_64.tar.gz
+      RG_WORK_DIR: ${{ github.workspace }}/rtcmp-generic-work
+      RG_RAYS_PER_VIEW: "100"
+      RG_PERF_SECONDS: "1"
+      RG_PERF_FAIL_THRESHOLD_PCT: "20"
+      #RG_MODEL_DIRS intentionally omitted for now; runner has built in fallback
+      RG_NUM_CPUS: "0"
+      RG_PERF_MAX_MEMORY: "0"
+      RG_CLEANUP_OUTPUT_ARTIFACTS: "1"
+      RG_LOG_LEVEL: "0"
 
-      RUN_RTCMP_PRIMS: "0"
-      RTCMP_PRIMS_DESCRIPTION: "prims"
-      RTCMP_PRIMS_STATUS: "0"
-      RTCMP_PRIMS_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-prims
+      RTCMP_PRIMS_ENABLED: "0"
+      RTCMP_PRIMS_DESCRIPTION: "run comparison on all BRL-CAD primitives"
+      RTCMP_PRIMS_STATUS: "SKIP"
       RTCMP_PRIMS_SUMMARY: ${{ github.workspace }}/perf-results/rtcmp-prims/prims_summary.csv
       # rtcmp_prims knobs
-      PRIMS_PERF_SECONDS: "1"
+      RP_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-prims
+      RP_PERF_SECONDS: "1"
 
-      RUN_BENCHMARK: "1"
+      BENCHMARK_ENABLED: "1"
       BENCHMARK_DESCRIPTION: "run the BRL-CAD benchmark and capture the VGR"
-      BENCHMARK_STATUS: "0"
+      BENCHMARK_STATUS: "SKIP"
       BENCHMARK_SUMMARY: ${{ github.workspace }}/perf-results/benchmark/summary.csv
-      
-      BENCHMARK_RESULTS_DIR: ${{ github.workspace }}/perf-results/benchmark
-      BENCHMARK_BUILD_NAME: "compare"
-      BENCHMARK_TIMEFRAME: "1"
-      BENCHMARK_MAXTIME: "15"
-      #BENCHMARK_AVERAGE: "5"
+      # benchmark knobs
+      BM_RESULTS_DIR: ${{ github.workspace }}/perf-results/benchmark
+      BM_TIMEFRAME: "1"
+      BM_MAXTIME: "15"
 
     steps:
       - name: Checkout
@@ -156,115 +154,99 @@ jobs:
 #        uses: actions/download-artifact@v4
 #        with:
 #          name: brlcad-main-linux-package
-#          path: main-package
+#          path: compare-package
 
       - name: Run rtcmp generic comparison
+        if: env.RTCMP_GENERIC_ENABLED == '1'
         run: |
+          # assume the worst
+          set -Eeuo pipefail
+          echo "RTCMP_GENERIC_STATUS=FAIL" >> "$GITHUB_ENV"
           # make sure dirs exist
-          mkdir -p "$RTCMP_RESULTS_DIR"
+          mkdir -p "$RG_RESULTS_DIR"
 
-          status=0
-          # run the compare script?
-          if [ "$RUN_RTCMP_GENERIC" = "1" ]; then
-            script_path="brlcad/.github/helper-scripts/rtcmp_generic_runner.sh"
-            test -f "$script_path"
-            chmod +x "$script_path"
+          script_path="brlcad/.github/helper-scripts/rtcmp_generic_runner.sh"
+          test -f "$script_path"
+          chmod +x "$script_path"
 
-            # For current lightweight wiring tests, compare release package to itself.
-            # Later, replace first argument with "$compare_pkg" from the linux_bext artifact.
-            set +e
-            "$script_path" "$BRLCAD_RELEASE_PACKAGE_URL" "$BRLCAD_RELEASE_PACKAGE_URL"
-            status=$?
-            set -e
-          fi
+          #compare_pkg="$(find compare-package -type f \( -name '*.tar.gz' -o -name '*.tgz' \) | sort | head -n 1)"
+          #test -n "$compare_pkg"
+          compare_package=$RG_RELEASE_PACKAGE
 
-          echo "RTCMP_GENERIC_STATUS=$status" >> "$GITHUB_ENV"
-          echo "RTCMP_GENERIC_SUMMARY=$RTCMP_RESULTS_DIR/summary.csv" >> "$GITHUB_ENV"
+          # run the script - map any exposed knobs
+          RTCMP_WORK_DIR="$RG_WORK_DIR" \
+          RTCMP_RESULTS_DIR="$RG_RESULTS_DIR" \
+          RAYS_PER_VIEW="$RG_RAYS_PER_VIEW" \
+          PERF_SECONDS="$RG_PERF_SECONDS" \
+          PERF_FAIL_THRESHOLD_PCT="$RG_PERF_FAIL_THRESHOLD_PCT" \
+          "$script_path" "$compare_package" "$RG_RELEASE_PACKAGE"
 
-          # Do not exit with $status here; let aggregation run first.
-          exit 0
+          # success
+          echo "RTCMP_GENERIC_STATUS=PASS" >> "$GITHUB_ENV"
 
       - name: Run rtcmp primitive performance
+        if: env.RTCMP_PRIMS_ENABLED == '1'
         run: |
-          mkdir -p "$RTCMP_PRIMS_RESULTS_DIR"
+          # assume the worst
+          set -Eeuo pipefail
+          echo "RTCMP_PRIMS_STATUS=FAIL" >> "$GITHUB_ENV"
+          # make sure dirs exist
+          mkdir -p "$RG_RESULTS_DIR"
 
-          status=0
+          script_path="brlcad/.github/helper-scripts/rtcmp_prims_runner.sh"
+          test -f "$script_path"
+          chmod +x "$script_path"
 
-          if [ "$RUN_RTCMP_PRIMS" = "1" ]; then
-            script_path="brlcad/.github/helper-scripts/rtcmp_prims_runner.sh"
-            test -f "$script_path"
-            chmod +x "$script_path"
+          # cheat: ensure rtcmp_generic ran first, so reuse its compare build
+          release_mged="$(find "$RG_WORK_DIR/brlcad-release" -type f -path '*/bin/mged' -print -quit)"
+          brl_prefix="$(dirname "$(dirname "$release_mged")")"
+          prims_g="$brl_prefix/share/db/primitives.g"
+          # FIXME: this will need to be rtcmp-build-compare/ when we revert the only release stub
+          compare_rtcmp="$RTCMP_WORK_DIR/rtcmp-build-release/rtcmp"
 
-            # cheat for now: rtcmp_generic ran first, so reuse its compare build
-            release_mged="$(find "$RTCMP_WORK_DIR/brlcad-release" -type f -path '*/bin/mged' | sort | head -n 1)"
-            test -n "$release_mged"
-            brl_prefix="$(dirname "$(dirname "$release_mged")")"
-            prims_g="$brl_prefix/share/db/primitives.g"
-            # FIXME: this will need to be rtcmp-build-compare/ when we revert the only release stub
-            compare_rtcmp="$RTCMP_WORK_DIR/rtcmp-build-release/rtcmp"
+          test -x "$release_mged"
+          test -f "$prims_g"
+          test -x "$compare_rtcmp"
 
-            test -x "$release_mged"
-            test -f "$prims_g"
-            test -x "$compare_rtcmp"
+          echo "Using MGED: $release_mged"
+          echo "Using primitives DB: $prims_g"
+          echo "Using rtcmp: $compare_rtcmp"
 
-            echo "Using MGED: $release_mged"
-            echo "Using primitives DB: $prims_g"
-            echo "Using rtcmp: $compare_rtcmp"
+          RTCMP_PRIMS_G="$prims_g" \
+          MGED="$release_mged" \
+          RTCMP="$compare_rtcmp" \
+          OUTDIR="$RP_RESULTS_DIR" \
+          PERF_SECONDS="$RP_PERF_SECONDS" \
+          "$script_path"
 
-            set +e
-            RTCMP_PRIMS_G="$prims_g" \
-            MGED="$release_mged" \
-            RTCMP="$compare_rtcmp" \
-            OUTDIR="$RTCMP_PRIMS_RESULTS_DIR" \
-            PERF_SECONDS="$PRIMS_PERF_SECONDS" \
-            "$script_path"
-            status=$?
-            set -e
-          fi
-
-          echo "RTCMP_PRIMS_STATUS=$status" >> "$GITHUB_ENV"
-          echo "RTCMP_PRIMS_SUMMARY=$RTCMP_PRIMS_RESULTS_DIR/prims_summary.csv" >> "$GITHUB_ENV"
-
-          # Do not exit with $status here; let aggregation run first.
-          exit 0
+          echo "RTCMP_PRIMS_STATUS=PASS" >> "$GITHUB_ENV"
 
       - name: Run BRL-CAD benchmark
+        if: env.BENCHMARK_ENABLED == '1'
         run: |
-          mkdir -p "$BENCHMARK_RESULTS_DIR"
+          set -Eeuo pipefail
+          echo "BENCHMARK_STATUS=FAIL" >> "$GITHUB_ENV"
+          mkdir -p "$BM_RESULTS_DIR"
 
-          status=0
+          script_path="brlcad/.github/helper-scripts/benchmark_runner.sh"
+          test -f "$script_path"
+          chmod +x "$script_path"
 
-          if [ "$RUN_BENCHMARK" = "1" ]; then
-            script_path="brlcad/.github/helper-scripts/benchmark_runner.sh"
-            test -f "$script_path"
-            chmod +x "$script_path"
+          # cheat: ensure rtcmp_generic runs first so we can reuse the builds
+          release_benchmark="$(find "$RG_WORK_DIR/brlcad-release" -type f -path '*/bin/benchmark' -print -quit)"
+          test -x "$release_benchmark"
+          #compare_benchmark="$(find "$RG_WORK_DIR/brlcad-compare" -type f -path '*/bin/benchmark' -print -quit)"
+          #test -x "$compare_benchmark"
 
-            # Reuse compare build extracted by rtcmp_generic
-            # FIXME: should be brlcad-compare not -release
-            benchmark_exe="$(find "$RTCMP_WORK_DIR/brlcad-release" -type f -path '*/bin/benchmark' | sort | head -n 1)"
+          echo "Using benchmark: $release_benchmark"
 
-            if [ -z "$benchmark_exe" ]; then
-              echo "Unable to locate benchmark executable under $RTCMP_WORK_DIR/brlcad-compare"
-              status=1
-            else
-              test -x "$benchmark_exe"
+          BENCHMARKS="$release_benchmark" \
+          OUTDIR="$BM_RESULTS_DIR" \
+          BENCHMARK_TIMEFRAME="$BM_TIMEFRAME" \
+          BENCHMARK_MAXTIME="$BM_MAXTIME" \
+          "$script_path"
 
-              echo "Using benchmark: $benchmark_exe"
-
-              set +e
-              BENCHMARKS="$benchmark_exe" \
-              OUTDIR="$BENCHMARK_RESULTS_DIR" \
-              "$script_path"
-              status=$?
-              set -e
-            fi
-          fi
-
-          echo "BENCHMARK_STATUS=$status" >> "$GITHUB_ENV"
-          echo "BENCHMARK_SUMMARY=$BENCHMARK_RESULTS_DIR/summary.csv" >> "$GITHUB_ENV"
-
-          # Do not exit with $status here; let aggregation run first.
-          exit 0
+          echo "BENCHMARK_STATUS=PASS" >> "$GITHUB_ENV"
 
       - name: Summarize results
         if: always()
@@ -285,3 +267,24 @@ jobs:
           name: performance-results
           path: perf-results
           retention-days: 7
+
+      - name: Check performance lane status
+        if: always()
+        shell: bash
+        run: |
+          failed=0
+
+          for lane in $PERF_LANES; do
+            upper="$(printf '%s' "$lane" | tr '[:lower:]-' '[:upper:]_')"
+            status_var="${upper}_STATUS"
+            status="${!status_var:-FAIL}"
+
+            printf '%s: %s\n' "$lane" "$status"
+
+            case "$status" in
+              PASS|SKIP) ;;
+              *) failed=1 ;;
+            esac
+          done
+
+          exit "$failed"
