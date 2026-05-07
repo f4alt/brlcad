@@ -251,13 +251,12 @@ jobs:
       - name: Summarize results
         if: always()
         run: |
-          script_path="brlcad/.github/helper-scripts/performance_output_aggregator.sh"
+          script_path="brlcad/.github/helper-scripts/performance_output_aggregator.py"
           test -f "$script_path"
-          chmod +x "$script_path"
-          "$script_path"
+          python3 "$script_path"
 
-          if [ -f "$RESULTS_ROOT/dashboard/summary.md" ]; then
-            cat "$RESULTS_ROOT/dashboard/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$RESULTS_ROOT/summary/summary.md" ]; then
+            cat "$RESULTS_ROOT/summary/summary.md" >> "$GITHUB_STEP_SUMMARY"
           fi
         
       - name: Upload rtcmp results
