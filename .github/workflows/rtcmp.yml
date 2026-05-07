@@ -105,7 +105,7 @@ jobs:
       #   <UPPER_LANE>_STATUS
       #   <UPPER_LANE>_SUMMARY
       ###
-      PERF_LANES: "rtcmp_prims rtcmp_generic"
+      PERF_LANES: "benchmark rtcmp_prims rtcmp_generic"
 
       RUN_RTCMP_GENERIC: "1"
       RTCMP_GENERIC_DESCRIPTION: "run rtcmp comparison and performance tests across general models"
@@ -124,13 +124,24 @@ jobs:
       # CLEANUP_OUTPUT_ARTIFACTS: "1"
       # LOG_LEVEL: "0"
 
-      RUN_RTCMP_PRIMS: "1"
+      RUN_RTCMP_PRIMS: "0"
       RTCMP_PRIMS_DESCRIPTION: "prims"
       RTCMP_PRIMS_STATUS: "0"
       RTCMP_PRIMS_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-prims
       RTCMP_PRIMS_SUMMARY: ${{ github.workspace }}/perf-results/rtcmp-prims/prims_summary.csv
       # rtcmp_prims knobs
       PRIMS_PERF_SECONDS: "1"
+
+      RUN_BENCHMARK: "1"
+      BENCHMARK_DESCRIPTION: "run the BRL-CAD benchmark and capture the VGR"
+      BENCHMARK_STATUS: "0"
+      BENCHMARK_SUMMARY: ${{ github.workspace }}/perf-results/benchmark/summary.csv
+      
+      BENCHMARK_RESULTS_DIR: ${{ github.workspace }}/perf-results/benchmark
+      BENCHMARK_BUILD_NAME: "compare"
+      BENCHMARK_TIMEFRAME: "1"
+      BENCHMARK_MAXTIME: "15"
+      #BENCHMARK_AVERAGE: "5"
 
     steps:
       - name: Checkout
@@ -213,6 +224,44 @@ jobs:
 
           echo "RTCMP_PRIMS_STATUS=$status" >> "$GITHUB_ENV"
           echo "RTCMP_PRIMS_SUMMARY=$RTCMP_PRIMS_RESULTS_DIR/prims_summary.csv" >> "$GITHUB_ENV"
+
+          # Do not exit with $status here; let aggregation run first.
+          exit 0
+
+      - name: Run BRL-CAD benchmark
+        run: |
+          mkdir -p "$BENCHMARK_RESULTS_DIR"
+
+          status=0
+
+          if [ "$RUN_BENCHMARK" = "1" ]; then
+            script_path="brlcad/.github/helper-scripts/benchmark_runner.sh"
+            test -f "$script_path"
+            chmod +x "$script_path"
+
+            # Reuse compare build extracted by rtcmp_generic
+            # FIXME: should be brlcad-compare not -release
+            benchmark_exe="$(find "$RTCMP_WORK_DIR/brlcad-release" -type f -path '*/bin/benchmark' | sort | head -n 1)"
+
+            if [ -z "$benchmark_exe" ]; then
+              echo "Unable to locate benchmark executable under $RTCMP_WORK_DIR/brlcad-compare"
+              status=1
+            else
+              test -x "$benchmark_exe"
+
+              echo "Using benchmark: $benchmark_exe"
+
+              set +e
+              BENCHMARKS="$benchmark_exe" \
+              OUTDIR="$BENCHMARK_RESULTS_DIR" \
+              "$script_path"
+              status=$?
+              set -e
+            fi
+          fi
+
+          echo "BENCHMARK_STATUS=$status" >> "$GITHUB_ENV"
+          echo "BENCHMARK_SUMMARY=$BENCHMARK_RESULTS_DIR/summary.csv" >> "$GITHUB_ENV"
 
           # Do not exit with $status here; let aggregation run first.
           exit 0
