@@ -246,7 +246,7 @@ jobs:
           BENCHMARK_MAXTIME="$BM_MAXTIME" \
           "$script_path"
 
-          echo "BENCHMARK_STATUS=PASS" >> "$GITHUB_ENV"
+          #echo "BENCHMARK_STATUS=PASS" >> "$GITHUB_ENV"
 
       - name: Summarize results
         if: always()
