@@ -44,12 +44,12 @@ lane_description() {
     get_env_default "${upper}_DESCRIPTION" "$lane"
 }
 
-lane_status_code() {
+lane_status() {
     local lane="$1"
     local upper
 
     upper="$(upper_name "$lane")"
-    get_env_default "${upper}_STATUS" "0"
+    get_env_default "${upper}_STATUS" "ERROR"
 }
 
 lane_summary_csv() {
@@ -61,20 +61,15 @@ lane_summary_csv() {
 }
 
 lane_status_label() {
-    local status_code="$1"
+    local status="$(lane_status "$1")"
     local summary_csv="$2"
 
-    if [[ "$status_code" != "0" ]]; then
+    if [[ "$status" != "SKIP" && (-z "$summary_csv" || ! -f "$summary_csv") ]]; then
         printf 'FAIL\n'
         return
     fi
 
-    if [[ -z "$summary_csv" || ! -f "$summary_csv" ]]; then
-        printf 'FAIL\n'
-        return
-    fi
-
-    printf 'PASS\n'
+    printf "$status\n"
 }
 
 csv_to_md_table() {
@@ -210,9 +205,8 @@ main() {
         local description status_code status summary_csv summary_path
 
         description="$(lane_description "$lane")"
-        status_code="$(lane_status_code "$lane")"
         summary_csv="$(lane_summary_csv "$lane")"
-        status="$(lane_status_label "$status_code" "$summary_csv")"
+        status="$(lane_status_label "$lane" "$summary_csv")"
         summary_path="$(relative_to_results_root "$summary_csv")"
 
         append_summary_md_lane "$lane" "$description" "$status" "$summary_csv" "$summary_path"
