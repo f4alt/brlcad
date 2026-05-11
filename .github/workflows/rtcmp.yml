@@ -124,7 +124,7 @@ jobs:
       RG_CLEANUP_OUTPUT_ARTIFACTS: "1"
       RG_LOG_LEVEL: "0"
 
-      RTCMP_PRIMS_ENABLED: "0"
+      RTCMP_PRIMS_ENABLED: "1"
       RTCMP_PRIMS_DESCRIPTION: "run comparison on all BRL-CAD primitives"
       RTCMP_PRIMS_STATUS: "SKIP"
       RTCMP_PRIMS_SUMMARY: ${{ github.workspace }}/perf-results/rtcmp-prims/prims_summary.csv
@@ -198,11 +198,11 @@ jobs:
           chmod +x "$script_path"
 
           # cheat: ensure rtcmp_generic ran first, so reuse its compare build
-          release_mged="$(find "$RG_WORK_DIR/brlcad-release" -type f -path '*/bin/mged' -print -quit)"
+          release_mged="$(find "$RG_WORK_DIR/brlcad-baseline" -type f -path '*/bin/mged' -print -quit)"
           brl_prefix="$(dirname "$(dirname "$release_mged")")"
           prims_g="$brl_prefix/share/db/primitives.g"
           # FIXME: this will need to be rtcmp-build-compare/ when we revert the only release stub
-          compare_rtcmp="$RTCMP_WORK_DIR/rtcmp-build-release/rtcmp"
+          compare_rtcmp="$RG_WORK_DIR/rtcmp-build-compare/rtcmp"
 
           test -x "$release_mged"
           test -f "$prims_g"
@@ -233,14 +233,14 @@ jobs:
           chmod +x "$script_path"
 
           # cheat: ensure rtcmp_generic runs first so we can reuse the builds
-          release_benchmark="$(find "$RG_WORK_DIR/brlcad-release" -type f -path '*/bin/benchmark' -print -quit)"
-          test -x "$release_benchmark"
+          baseline_benchmark="$(find "$RG_WORK_DIR/brlcad-baseline" -type f -path '*/bin/benchmark' -print -quit)"
+          test -x "$baseline_benchmark"
           #compare_benchmark="$(find "$RG_WORK_DIR/brlcad-compare" -type f -path '*/bin/benchmark' -print -quit)"
           #test -x "$compare_benchmark"
 
-          echo "Using benchmark: $release_benchmark"
+          echo "Using benchmark: $baseline_benchmark"
 
-          BENCHMARKS="$release_benchmark" \
+          BENCHMARKS="$baseline_benchmark" \
           OUTDIR="$BM_RESULTS_DIR" \
           BENCHMARK_TIMEFRAME="$BM_TIMEFRAME" \
           BENCHMARK_MAXTIME="$BM_MAXTIME" \
