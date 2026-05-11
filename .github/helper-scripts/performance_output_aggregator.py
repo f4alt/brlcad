@@ -142,7 +142,7 @@ def write_summary_md(lanes: list[LaneResult], out_path: Path) -> None:
         if lane.summary:
             lines.extend([csv_rows_to_md(lane.summary), ""])
         else:
-            missing = lane.summary_csv_abs or "<unset>"
+            missing = lane.summary_csv_raw or "<unset>"
             lines.extend([f"_Missing or empty summary file: `{missing}`_", ""])
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
