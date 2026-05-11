@@ -174,8 +174,8 @@ jobs:
           compare_package=$RG_RELEASE_PACKAGE
 
           # run the script - map any exposed knobs
-          RTCMP_WORK_DIR="$RG_WORK_DIR" \
-          RTCMP_RESULTS_DIR="$RG_RESULTS_DIR" \
+          WORK_DIR="$RG_WORK_DIR" \
+          RESULTS_DIR="$RG_RESULTS_DIR" \
           RAYS_PER_VIEW="$RG_RAYS_PER_VIEW" \
           PERF_SECONDS="$RG_PERF_SECONDS" \
           PERF_FAIL_THRESHOLD_PCT="$RG_PERF_FAIL_THRESHOLD_PCT" \

@@ -3,60 +3,28 @@
 set -Eeuo pipefail
 
 usage() {
-    printf 'Usage: %s COMPARE_PACKAGE RELEASE_PACKAGE_URL\n' "$(basename "$0")"
+    printf 'Usage: %s BASELINE_BRLCAD COMPARE_BRLCAD\n' "$(basename "$0")"
 }
-
-log() { printf '%s\n' "$*"; }
-log_section() { printf '\n===> %s\n' "$*"; }
-log_error() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 ###
 # Helpers
 ###
-require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || log_error "Required command not found: $1"
-}
+log() { printf '%s\n' "$*" >&2; }
+log_section() { printf '\n===> %s\n' "$*" >&2; }
+log_error() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 abs_path() {
-    local p="$1"
+    local path="$1"
+    local dir=""
+    local base=""
 
-    if [ -d "$p" ]; then
-        (cd "$p" && pwd)
+    if [ -d "$path" ]; then
+        (cd "$path" && pwd)
     else
-        local d
-        local b
-        d="$(dirname "$p")"
-        b="$(basename "$p")"
-        printf '%s/%s\n' "$(cd "$d" && pwd)" "$b"
+        dir="$(dirname "$path")"
+        base="$(basename "$path")"
+        printf '%s/%s\n' "$(cd "$dir" && pwd)" "$base"
     fi
-}
-
-extract_package() {
-    local package="$1"
-    local dest="$2"
-
-    [ -f "$package" ] || log_error "Package does not exist: $package"
-
-    mkdir -p "$dest"
-
-    case "$package" in
-        *.tar.gz|*.tgz)
-            tar -xf "$package" --checkpoint=1000 --checkpoint-action=dot -C "$dest"
-            ;;
-        *)
-            log_error "Unsupported package type: $package"
-            ;;
-    esac
-}
-
-find_brlcad_prefix() {
-    local root="$1"
-    local rt
-
-    rt="$(find "$root" -type f -path '*/bin/rt' | sort | head -n 1 || true)"
-    [ -n "$rt" ] || log_error "Unable to locate rt executable under: $root"
-
-    dirname "$(dirname "$rt")"
 }
 
 check_args() {
@@ -65,15 +33,14 @@ check_args() {
         exit 1
     fi
 
-    #COMPARE_PACKAGE="$(abs_path "$1")"
-    RELEASE_URL="$2"
-
-    #[ -f "$COMPARE_PACKAGE" ] || log_error "Compare package does not exist: $COMPARE_PACKAGE"
+    BRL_BASELINE_INPUT="$1"
+    BRL_COMPARE_INPUT="$2"
 }
 
 check_requirements() {
     log_section "Checking required tools"
 
+    require_cmd() { command -v "$1" >/dev/null 2>&1 || log_error "Required command not found: $1"; }
     require_cmd cmake
     require_cmd git
     require_cmd find
@@ -82,117 +49,149 @@ check_requirements() {
     require_cmd ninja
 }
 
-setup_paths() {
-    log_section "Setting up paths"
+setup_dirs() {
+    log_section "Setting up dirs"
 
-    WORK_DIR="${RTCMP_WORK_DIR:-$PWD/rtcmp-work}"
-    RESULTS_DIR="${RTCMP_RESULTS_DIR:-$PWD/rtcmp-results}"
-    RTCMP_REF="${RTCMP_REF:-main}"
+    # pull from env variables, if set
+    WORK_DIR="${WORK_DIR:-$PWD/rtcmp-work}"
+    RESULTS_DIR="${RESULTS_DIR:-$PWD/rtcmp-results}"
+    REF="${REF:-main}"
 
+    # scrub paths
     WORK_DIR="$(abs_path "$WORK_DIR")"
     RESULTS_DIR="$(abs_path "$RESULTS_DIR")"
 
-    COMPARE_EXTRACT_DIR="$WORK_DIR/brlcad-compare"
-    RELEASE_EXTRACT_DIR="$WORK_DIR/brlcad-release"
-
-    RELEASE_PACKAGE_DIR="$WORK_DIR/release-package"
-    RELEASE_PACKAGE="$RELEASE_PACKAGE_DIR/$(basename "$RELEASE_URL")"
-
+    # setup path organization
+    DOWNLOAD_DIR="$WORK_DIR/downloads"
+    BRL_COMPARE_EXTRACT_DIR="$WORK_DIR/brlcad-compare"
+    BRL_BASELINE_EXTRACT_DIR="$WORK_DIR/brlcad-baseline"
     RTCMP_SRC_DIR="$WORK_DIR/rtcmp"
     RTCMP_COMPARE_BUILD="$WORK_DIR/rtcmp-build-compare"
-    RTCMP_RELEASE_BUILD="$WORK_DIR/rtcmp-build-release"
-}
+    RTCMP_BASELINE_BUILD="$WORK_DIR/rtcmp-build-baseline"
 
-prepare_dirs() {
-    log_section "Preparing work directories"
-
+    # ensure work starts fresh
     rm -rf "$WORK_DIR"
 
+    # ensure paths exist
     mkdir -p \
         "$WORK_DIR" \
         "$RESULTS_DIR" \
-        "$RELEASE_PACKAGE_DIR"
+        "$DOWNLOAD_DIR" \
+        "$BRL_COMPARE_EXTRACT_DIR" \
+        "$BRL_BASELINE_EXTRACT_DIR" \
+        "$RTCMP_SRC_DIR" \
+        "$RTCMP_COMPARE_BUILD" \
+        "$RTCMP_BASELINE_BUILD"
 }
 
-download_release() {
-    log_section "Resolving release package"
+extract_tarball() {
+    local package="$1"
+    local dest="$2"
 
-    # see if we have a url or a local copy
-    if [[ "$RELEASE_URL" == http* ]]; then
-    	curl -L --fail --retry 3 --output "$RELEASE_PACKAGE" "$RELEASE_URL"
+    [ -f "$package" ] || log_error "Package does not exist: $package"
+
+    mkdir -p "$dest"
+    case "$package" in
+        *.tar.gz|*.tgz)
+            log "Extracting $package"
+            tar -xf "$package" --checkpoint=1000 --checkpoint-action=dot -C "$dest" >&2
+            ;;
+        *)
+            log_error "Unsupported package type: $package"
+            ;;
+    esac
+}
+
+verify_brlcad() {
+    local label="$1"
+    local root="$2"
+    local prefix=""
+    local rt=""
+
+    [[ -d "$root" ]] || log_error "Directory does not exist: $root"
+
+    # see if we can find bin dir
+    if [[ -x "$root/bin/rt" ]]; then
+        # at the right level
+        prefix="$root"
     else
-	RELEASE_PACKAGE="$(abs_path "$RELEASE_URL")"
+        # try to see if we're nested somewhere
+        rt="$(find "$root" -type f -path '*/bin/rt' | sort | head -n 1 || true)"
+        [[ -n "$rt" ]] || log_error "Unable to locate BRL-CAD bin/ under: $root"
+        prefix="$(dirname "$(dirname "$rt")")"
     fi
 
-    [ -f "$RELEASE_PACKAGE" ] || log_error "Release package download failed: $RELEASE_URL"
+    # lazy check that this is a built brlcad
+    [[ -x "$prefix/bin/rt" ]] || log_error "$label BRL-CAD rt is not executable: $prefix/bin/rt"
+    [[ -x "$prefix/bin/mged" ]] || log_error "$label BRL-CAD mged is not executable: $prefix/bin/mged"
+
+    # return
+    echo "$prefix"
 }
 
-extract_brlcad_packages() {
-    log_section "Extracting compare package"
+resolve_brlcad_input() {
+    local label="$1"
+    local input="$2"
+    local out_dir="$3"
+    local package=""
+    local prefix=""
 
-    #extract_package "$COMPARE_PACKAGE" "$COMPARE_EXTRACT_DIR"
-    #COMPARE_PREFIX="$(find_brlcad_prefix "$COMPARE_EXTRACT_DIR")"
+    log_section "Resolving $label BRL-CAD input"
 
-    #log "Compare BRL-CAD prefix: $COMPARE_PREFIX"
+    # should have one of: url to zip | local zip | local build
+    if [[ "$input" == http* ]]; then
+        local url_basename="${input##*/}"
+        package="$DOWNLOAD_DIR/${label}-${url_basename}"
+        curl -L --fail --retry 3 --output "$package" "$input"
+        extract_tarball "$package" "$out_dir"
+    elif [[ -f "$input" ]]; then
+        package="$(abs_path "$input")"
+        extract_tarball "$package" "$out_dir"
+    elif [[ -d "$input" ]]; then
+        out_dir="$(abs_path "$input")"
+    else
+        log_error "$label input is not a URL, tarball, or directory: $input"
+    fi
 
-    log_section "Extracting release package"
+    prefix="$(verify_brlcad "$label" "$out_dir")"
 
-    extract_package "$RELEASE_PACKAGE" "$RELEASE_EXTRACT_DIR"
-    RELEASE_PREFIX="$(find_brlcad_prefix "$RELEASE_EXTRACT_DIR")"
-
-    log "Release BRL-CAD prefix: $RELEASE_PREFIX"
+    echo "$prefix"
 }
 
-verify_brlcad_installs() {
-    log_section "Verifying BRL-CAD executables"
+build_rtcmp() {
+    local label="$1"
+    local brl_root="$2"
+    local build_dir="$3"
+    local out_var="$4"
+    local exe=""
 
-    test -x "$COMPARE_PREFIX/bin/rt" || log_error "Compare rt is not executable: $COMPARE_PREFIX/bin/rt"
-    test -x "$RELEASE_PREFIX/bin/rt" || log_error "Release rt is not executable: $RELEASE_PREFIX/bin/rt"
-    test -x "$COMPARE_PREFIX/bin/mged" || log_error "Compare mged is not executable: $COMPARE_PREFIX/bin/mged"
+    log_section "Building rtcmp against $label BRL-CAD"
 
-    "$COMPARE_PREFIX/bin/rt" -v || true
-    "$RELEASE_PREFIX/bin/rt" -v || true
+    cmake -S "$RTCMP_SRC_DIR" -B "$build_dir" -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBRLCAD_ROOT="$brl_root"
+
+    cmake --build "$build_dir" --config Release --target rtcmp
+
+    exe="$build_dir/rtcmp"
+    [[ -x "$exe" ]] || log_error "$label-linked rtcmp was not built: $exe"
+
+    printf -v "$out_var" '%s' "$exe"
 }
 
 checkout_rtcmp() {
-    log_section "Checking out rtcmp ref: $RTCMP_REF"
+    log_section "Checking out rtcmp ref: $REF"
 
-    git clone --depth 1 --branch "$RTCMP_REF" \
+    git clone --depth 1 --branch "$REF" \
         https://github.com/BRL-CAD/rtcmp.git \
         "$RTCMP_SRC_DIR"
 }
 
-build_rtcmp_compare() {
-    log_section "Building rtcmp against compare BRL-CAD"
-
-    cmake -S "$RTCMP_SRC_DIR" -B "$RTCMP_COMPARE_BUILD" -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBRLCAD_ROOT="$COMPARE_PREFIX"
-
-    cmake --build "$RTCMP_COMPARE_BUILD" --config Release --target rtcmp
-
-    COMPARE_RTCMP="$RTCMP_COMPARE_BUILD/rtcmp"
-    test -x "$COMPARE_RTCMP" || log_error "Compare-linked rtcmp was not built: $COMPARE_RTCMP"
-}
-
-build_rtcmp_release() {
-    log_section "Building rtcmp against release BRL-CAD"
-
-    cmake -S "$RTCMP_SRC_DIR" -B "$RTCMP_RELEASE_BUILD" -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBRLCAD_ROOT="$RELEASE_PREFIX"
-
-    cmake --build "$RTCMP_RELEASE_BUILD" --config Release --target rtcmp
-
-    RELEASE_RTCMP="$RTCMP_RELEASE_BUILD/rtcmp"
-    test -x "$RELEASE_RTCMP" || log_error "Release-linked rtcmp was not built: $RELEASE_RTCMP"
-}
-
 log_test_env() {
     log "rtcmp test configuration:"
-    log "  CMD1         : $COMPARE_RTCMP"
-    log "  CMD2         : $RELEASE_RTCMP"
-    log "  MGED         : $COMPARE_PREFIX/bin/mged"
+    log "  CMD1         : $BASELINE_RTCMP"
+    log "  CMD2         : $COMPARE_RTCMP"
+    log "  MGED         : $BASELINE_PREFIX/bin/mged"
     log "  OUTDIR       : $RESULTS_DIR"
     log "  MODEL_DIRS   : ${MODEL_DIRS:-<tests.sh default>}"
     log "  PERF_SECONDS : ${PERF_SECONDS:-<tests.sh default>}"
@@ -200,29 +199,30 @@ log_test_env() {
 }
 
 run_comparison() {
+    # note: function assumes we have a COMPARE_RTCMP and BASELINE_RTCMP vars set for exe's
+    #       as well as COMPARE_PREFIX to find a path to mged
     log_section "Running rtcmp comparison"
 
+    # make sure we have rtcmp script
     local test_script="$RTCMP_SRC_DIR/tests.sh"
-
     test -f "$test_script" || log_error "rtcmp test script not found: $test_script"
     chmod +x "$test_script"
     test -x "$test_script" || log_error "rtcmp test script is not executable: $test_script"
 
-    COMPARE_RTCMP="$RELEASE_RTCMP"
-    COMPARE_PREFIX="$RELEASE_PREFIX"
+    # make sure we have executables
     test -x "$COMPARE_RTCMP" || log_error "Compare rtcmp is not executable: $COMPARE_RTCMP"
-    test -x "$RELEASE_RTCMP" || log_error "Release rtcmp is not executable: $RELEASE_RTCMP"
-    test -x "$COMPARE_PREFIX/bin/mged" || log_error "Compare MGED is not executable: $COMPARE_PREFIX/bin/mged"
+    test -x "$BASELINE_RTCMP" || log_error "Baseline rtcmp is not executable: $BASELINE_RTCMP"
+    test -x "$BASELINE_PREFIX/bin/mged" || log_error "Baseline MGED is not executable: $BASELINE_PREFIX/bin/mged"
 
-    # if we don't have any model dirs requested, default to the release share/db/chess set for now
-    MODEL_DIRS="${MODEL_DIRS:-$RELEASE_PREFIX/share/db/chess}"
+    # if we don't have any model dirs requested, default to the baseline share/db/chess set for now
+    MODEL_DIRS="${MODEL_DIRS:-$BASELINE_PREFIX/share/db/chess}"
     export MODEL_DIRS
 
     log_test_env
 
-    CMD1="$RELEASE_RTCMP" \
+    CMD1="$BASELINE_RTCMP" \
     CMD2="$COMPARE_RTCMP" \
-    MGED="$RELEASE_PREFIX/bin/mged" \
+    MGED="$BASELINE_PREFIX/bin/mged" \
     OUTDIR="$RESULTS_DIR" \
     "$test_script"
 
@@ -233,16 +233,15 @@ run_comparison() {
 main() {
     check_args "$@"
     check_requirements
-    setup_paths
-    prepare_dirs
 
-    download_release
-    extract_brlcad_packages
-#    verify_brlcad_installs
+    setup_dirs
+
+    BASELINE_PREFIX="$(resolve_brlcad_input "baseline" "$BRL_BASELINE_INPUT" "$BRL_BASELINE_EXTRACT_DIR")"
+    COMPARE_PREFIX="$(resolve_brlcad_input "compare" "$BRL_COMPARE_INPUT" "$BRL_COMPARE_EXTRACT_DIR")"
 
     checkout_rtcmp
-#    build_rtcmp_compare
-    build_rtcmp_release
+    build_rtcmp "baseline" "$BASELINE_PREFIX" "$RTCMP_BASELINE_BUILD" BASELINE_RTCMP
+    build_rtcmp "compare" "$COMPARE_PREFIX" "$RTCMP_COMPARE_BUILD" COMPARE_RTCMP
 
     run_comparison
 }
