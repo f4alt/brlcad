@@ -113,7 +113,7 @@ jobs:
       RTCMP_GENERIC_SUMMARY: ${{ github.workspace }}/perf-results/rtcmp-generic/summary.csv
       # rtcmp_generic knobs
       RG_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-generic
-      RG_RELEASE_PACKAGE: https://github.com/BRL-CAD/brlcad/releases/download/rel-7-42-0/BRL-CAD_7.42.0_Linux_x86_64.tar.gz
+      RG_BASELINE_PACKAGE: https://github.com/BRL-CAD/brlcad/releases/download/rel-7-42-0/BRL-CAD_7.42.0_Linux_x86_64.tar.gz
       RG_WORK_DIR: ${{ github.workspace }}/rtcmp-generic-work
       RG_RAYS_PER_VIEW: "100"
       RG_PERF_SECONDS: "1"
@@ -178,7 +178,7 @@ jobs:
           RAYS_PER_VIEW="$RG_RAYS_PER_VIEW" \
           PERF_SECONDS="$RG_PERF_SECONDS" \
           PERF_FAIL_THRESHOLD_PCT="$RG_PERF_FAIL_THRESHOLD_PCT" \
-          "$script_path" "$compare_package" "$RG_RELEASE_PACKAGE"
+          "$script_path" "$RG_BASELINE_PACKAGE" "$compare_pkg"
 
           # success
           echo "RTCMP_GENERIC_STATUS=PASS" >> "$GITHUB_ENV"
@@ -190,7 +190,7 @@ jobs:
           set -Eeuo pipefail
           echo "RTCMP_PRIMS_STATUS=FAIL" >> "$GITHUB_ENV"
           # make sure dirs exist
-          mkdir -p "$RG_RESULTS_DIR"
+          mkdir -p "$RP_RESULTS_DIR"
 
           script_path="brlcad/.github/helper-scripts/rtcmp_prims_runner.sh"
           test -f "$script_path"
