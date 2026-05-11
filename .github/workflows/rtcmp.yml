@@ -9,84 +9,84 @@
 # 24 hour block of time, so the developer will need to track down the
 # specifics themselves.
 
-name: rtcmp test
+name: Performance tests
 
 on:
   workflow_dispatch:
 
 jobs:
 
-#  linux_bext:
-#    name: Linux - BRL-CAD bext build
-#    runs-on: ubuntu-latest
-#    strategy:
-#      fail-fast: true
-#    env:
-#      DEBIAN_FRONTEND: noninteractive
-#    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-#    steps:
-#      - name: Setup - CMake
-#        uses: lukka/get-cmake@latest
-#
-#      # Cache apt package downloads (not installed pkgs)
-#      - name: Cache apt packages
-#        uses: actions/cache@v4
-#        with:
-#          path: |
-#            /var/cache/apt/archives
-#          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/check.yml') }}
-#
-#      # Install system dependencies
-#      - name: Install apt dependencies
-#        run: |
-#          sudo apt-get update
-#          # Install X/OpenGL dev pkgs
-#          sudo apt-get install xserver-xorg-dev libx11-dev libxi-dev libxext-dev libglu1-mesa-dev libfontconfig-dev
-#          # Install tools
-#          sudo apt-get install astyle re2c xsltproc libxml2-utils
-#          # Install dependency dev pkgs
-#          sudo apt-get install zlib1g-dev libpng-dev libjpeg-dev libtiff-dev libeigen3-dev libgdal-dev libassimp-dev libopencv-dev tcl-dev tk-dev
-#          # Install XCB/OpenGL dev pkgs for Qt - see:
-#          # https://wiki.qt.io/Building_Qt_6_from_Git
-#          # https://doc.qt.io/qt-6/linux-requirements.html
-#          sudo apt-get install libfontconfig1-dev libfreetype6-dev libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxcb1-dev libxcb-cursor-dev libxcb-glx0-dev libxcb-keysyms1-dev libxcb-image0-dev libxcb-shm0-dev libxcb-icccm4-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shape0-dev libxcb-randr0-dev libxcb-render-util0-dev libxcb-util-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libxcb-xrm-dev libxkbcommon-dev libxkbcommon-x11-dev
-#          sudo apt-get install libgl-dev
-#          sudo apt-get install libinput-dev
-#
-#      - name: Checkout
-#        uses: actions/checkout@v4
-#        with:
-#          path: brlcad
-#
-#      - name: Directory setup
-#        run: |
-#          cmake -E make_directory build_linux
-#          cmake -E make_directory $HOME/.cache
-#          cmake -E make_directory $HOME/.cache/BRL-CAD
-#
-#      - name: Configure
-#        run: |
-#          export PATH=$GITHUB_WORKSPACE:$PATH
-#          cmake -S brlcad -B build_linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DBRLCAD_EXT_PARALLEL=1 -DBRLCAD_BEXT_CLEANUP=ON -DBRLCAD_ENABLE_QT=ON
-#
-#      - name: Build + Check + Package
-#        run: |
-#          export PATH=$GITHUB_WORKSPACE:$PATH
-#          cmake --build build_linux --config Release --target check
-#          cmake --build build_linux --config Release --target package
-#
-#      - name: Upload Linux package for rtcmp
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: brlcad-main-linux-package
-#          path: |
-#            build_linux/*.tar.gz
-#          if-no-files-found: error
-#          retention-days: 7
+  linux_build:
+    name: Linux - BRL-CAD build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    if: (github.event_name == 'schedule' && github.ref == 'refs/heads/main') ||
+        github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Setup - CMake
+        uses: lukka/get-cmake@latest
+
+      # Cache apt package downloads (not installed pkgs)
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/check.yml') }}
+
+      # Install system dependencies
+      - name: Install apt dependencies
+        run: |
+          sudo apt-get update
+          # Install X/OpenGL dev pkgs
+          sudo apt-get install xserver-xorg-dev libx11-dev libxi-dev libxext-dev libglu1-mesa-dev libfontconfig-dev
+          # Install tools
+          sudo apt-get install astyle re2c xsltproc libxml2-utils
+          # Install dependency dev pkgs
+          sudo apt-get install zlib1g-dev libpng-dev libjpeg-dev libtiff-dev libeigen3-dev libgdal-dev libassimp-dev libopencv-dev tcl-dev tk-dev
+          # Install XCB/OpenGL dev pkgs for Qt - see:
+          # https://wiki.qt.io/Building_Qt_6_from_Git
+          # https://doc.qt.io/qt-6/linux-requirements.html
+          sudo apt-get install libfontconfig1-dev libfreetype6-dev libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxcb1-dev libxcb-cursor-dev libxcb-glx0-dev libxcb-keysyms1-dev libxcb-image0-dev libxcb-shm0-dev libxcb-icccm4-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shape0-dev libxcb-randr0-dev libxcb-render-util0-dev libxcb-util-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libxcb-xrm-dev libxkbcommon-dev libxkbcommon-x11-dev
+          sudo apt-get install libgl-dev
+          sudo apt-get install libinput-dev
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: brlcad
+
+      - name: Directory setup
+        run: |
+          cmake -E make_directory build_linux
+          cmake -E make_directory $HOME/.cache
+          cmake -E make_directory $HOME/.cache/BRL-CAD
+
+      - name: Configure
+        run: |
+          export PATH=$GITHUB_WORKSPACE:$PATH
+          cmake -S brlcad -B build_linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DBRLCAD_EXT_PARALLEL=1 -DBRLCAD_BEXT_CLEANUP=ON -DBRLCAD_ENABLE_QT=ON
+
+      - name: Build Package
+        run: |
+          export PATH=$GITHUB_WORKSPACE:$PATH
+          cmake --build build_linux --config Release --target package
+
+      - name: Upload Linux package for performance tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: brlcad-main-linux-package
+          path: |
+            build_linux/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
 
   linux_performance:
     name: Performance Runner
-#    needs: [linux_bext]
+    needs: [linux_build]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -150,11 +150,11 @@ jobs:
       #TODO: do we need this?
       #- name: Install dependencies
 
-#      - name: Download BRL-CAD comparison package
-#        uses: actions/download-artifact@v4
-#        with:
-#          name: brlcad-main-linux-package
-#          path: compare-package
+      - name: Download BRL-CAD comparison package
+        uses: actions/download-artifact@v4
+        with:
+          name: brlcad-main-linux-package
+          path: compare-package
 
       - name: Run rtcmp generic comparison
         if: env.RTCMP_GENERIC_ENABLED == '1'
@@ -169,9 +169,8 @@ jobs:
           test -f "$script_path"
           chmod +x "$script_path"
 
-          #compare_pkg="$(find compare-package -type f \( -name '*.tar.gz' -o -name '*.tgz' \) | sort | head -n 1)"
-          #test -n "$compare_pkg"
-          compare_package=$RG_RELEASE_PACKAGE
+          compare_pkg="$(find compare-package -type f \( -name '*.tar.gz' -o -name '*.tgz' \) | sort | head -n 1)"
+          test -n "$compare_pkg"
 
           # run the script - map any exposed knobs
           WORK_DIR="$RG_WORK_DIR" \
@@ -197,23 +196,22 @@ jobs:
           test -f "$script_path"
           chmod +x "$script_path"
 
-          # cheat: ensure rtcmp_generic ran first, so reuse its compare build
-          release_mged="$(find "$RG_WORK_DIR/brlcad-baseline" -type f -path '*/bin/mged' -print -quit)"
-          brl_prefix="$(dirname "$(dirname "$release_mged")")"
+          # cheat: ensure rtcmp_generic ran first, so reuse its baseline build
+          baseline_mged="$(find "$RG_WORK_DIR/brlcad-baseline" -type f -path '*/bin/mged' -print -quit)"
+          brl_prefix="$(dirname "$(dirname "$baseline_mged")")"
           prims_g="$brl_prefix/share/db/primitives.g"
-          # FIXME: this will need to be rtcmp-build-compare/ when we revert the only release stub
           compare_rtcmp="$RG_WORK_DIR/rtcmp-build-compare/rtcmp"
 
-          test -x "$release_mged"
+          test -x "$baseline_mged"
           test -f "$prims_g"
           test -x "$compare_rtcmp"
 
-          echo "Using MGED: $release_mged"
+          echo "Using MGED: $baseline_mged"
           echo "Using primitives DB: $prims_g"
           echo "Using rtcmp: $compare_rtcmp"
 
           RTCMP_PRIMS_G="$prims_g" \
-          MGED="$release_mged" \
+          MGED="$baseline_mged" \
           RTCMP="$compare_rtcmp" \
           OUTDIR="$RP_RESULTS_DIR" \
           PERF_SECONDS="$RP_PERF_SECONDS" \
@@ -235,12 +233,13 @@ jobs:
           # cheat: ensure rtcmp_generic runs first so we can reuse the builds
           baseline_benchmark="$(find "$RG_WORK_DIR/brlcad-baseline" -type f -path '*/bin/benchmark' -print -quit)"
           test -x "$baseline_benchmark"
-          #compare_benchmark="$(find "$RG_WORK_DIR/brlcad-compare" -type f -path '*/bin/benchmark' -print -quit)"
-          #test -x "$compare_benchmark"
+          compare_benchmark="$(find "$RG_WORK_DIR/brlcad-compare" -type f -path '*/bin/benchmark' -print -quit)"
+          test -x "$compare_benchmark"
+          benchmarks="$baseline_benchmark $compare_benchmark"
 
-          echo "Using benchmark: $baseline_benchmark"
+          echo "Using benchmarks: $benchmarks"
 
-          BENCHMARKS="$baseline_benchmark" \
+          BENCHMARKS="$benchmarks" \
           OUTDIR="$BM_RESULTS_DIR" \
           BENCHMARK_TIMEFRAME="$BM_TIMEFRAME" \
           BENCHMARK_MAXTIME="$BM_MAXTIME" \
