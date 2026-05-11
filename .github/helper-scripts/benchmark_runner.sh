@@ -67,12 +67,6 @@ parse_vgr() {
           }
         }
       }
-
-      END {
-        if (v != "") {
-          print v
-        }
-      }
     ' "$logfile"
 }
 
@@ -118,11 +112,13 @@ run_one_benchmark() {
     local logfile="$build_outdir/benchmark.log"
 
     local build_name="$default_name"
+    local parsed_name=""
     local vgr="-1"
     local rc=0
 
     mkdir -p "$build_outdir"
 
+    local -a args
     mapfile -t args < <(benchmark_args)
 
     log "Running benchmark: $benchmark_exe ${args[*]}"
@@ -138,7 +134,7 @@ run_one_benchmark() {
     if [[ "$rc" -ne 0 ]]; then
         log "ERROR: benchmark failed with exit code $rc; see $logfile"
         printf '"%s",%s\n' "$build_name" "$vgr"
-        return 0
+        return "$rc"
     fi
 
     parsed_name="$(parse_build_name "$logfile")"
@@ -151,7 +147,8 @@ run_one_benchmark() {
     vgr="$(parse_vgr "$logfile")"
     if [[ -z "$vgr" ]]; then
         log "ERROR: benchmark completed but VGR could not be parsed; see $logfile"
-        vgr="-1"
+        printf '"%s",%s\n' "$build_name" "-1"
+        return 2
     fi
 
     printf '"%s",%s\n' "$build_name" "$vgr"
@@ -161,16 +158,33 @@ main() {
     check_prereqs
 
     local summary_csv="$OUTDIR/summary.csv"
-
     echo "build,vgr" > "$summary_csv"
 
+    local rc=0
+    local failures=0
+    local fail_rc=0     # note: only first failing rc is captured
     local benchmark_exe
     for benchmark_exe in $BENCHMARKS; do
         [[ -n "${benchmark_exe//[[:space:]]/}" ]] || continue
-        run_one_benchmark "$benchmark_exe" >> "$summary_csv"
+
+        if run_one_benchmark "$benchmark_exe" >> "$summary_csv"; then
+            rc=0
+        else
+            rc=$?
+            failures=$((failures + 1))
+            if [[ "$fail_rc" -eq 0 ]]; then
+                fail_rc="$rc"
+            fi
+        fi
     done
 
     log "Summary: $summary_csv"
+
+    if [[ "$failures" -ne 0 ]]; then
+        # log instead of error so we can bubble rc
+        log "ERROR: $failures benchmark runs(s) failed. First rc: $fail_rc"
+        exit "$fail_rc"
+    fi
 }
 
 main "$@"
