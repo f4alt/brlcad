@@ -157,7 +157,7 @@ jobs:
           path: compare-package
 
       - name: Run rtcmp generic comparison
-        if: env.RTCMP_GENERIC_ENABLED == '1'
+        if: always() && env.RTCMP_GENERIC_ENABLED == '1'
         run: |
           # assume the worst
           set -Eeuo pipefail
@@ -184,7 +184,7 @@ jobs:
           echo "RTCMP_GENERIC_STATUS=PASS" >> "$GITHUB_ENV"
 
       - name: Run rtcmp primitive performance
-        if: env.RTCMP_PRIMS_ENABLED == '1'
+        if: always() && env.RTCMP_PRIMS_ENABLED == '1'
         run: |
           # assume the worst
           set -Eeuo pipefail
@@ -220,7 +220,7 @@ jobs:
           echo "RTCMP_PRIMS_STATUS=PASS" >> "$GITHUB_ENV"
 
       - name: Run BRL-CAD benchmark
-        if: env.BENCHMARK_ENABLED == '1'
+        if: always() && env.BENCHMARK_ENABLED == '1'
         run: |
           set -Eeuo pipefail
           echo "BENCHMARK_STATUS=FAIL" >> "$GITHUB_ENV"
