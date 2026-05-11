@@ -84,13 +84,13 @@ run_prim_perf() {
     if [[ "$rc" -ne 0 ]]; then
         log "    ERROR: $prim failed with exit code $rc; see $logfile"
 
-        if [[ -f bomb.log ]]; then
-            mv bomb.log "$OUTDIR/${tag}.bomb.log"
+        if [[ -f "$OUTDIR/bomb.log" ]]; then
+            mv "$OUTDIR/bomb.log" "$OUTDIR/${tag}.bomb.log"
             log "    ERROR: bomb log saved to $OUTDIR/${tag}.bomb.log"
         fi
 
         echo "$prim,-1"
-        return 0
+        return "$rc"
     fi
 
     rps="$(parse_perf_output "$logfile")"
@@ -98,7 +98,7 @@ run_prim_perf() {
     if [[ -z "$rps" ]]; then
         log "    ERROR: unable to parse rays/sec for $prim; see $logfile"
         echo "$prim,-1"
-        return 0
+        return 2
     fi
 
     echo "$prim,$rps"
@@ -120,14 +120,25 @@ main() {
 
     echo "prim,rays_per_sec" >"$raw_csv"
 
-    local prim tag
+    local prim tag rc
+    local failures=0
+    local fail_rc=0
     for prim in "${prims[@]}"; do
         [[ -n "${prim//[[:space:]]/}" ]] || continue
 
         tag="$(safe_tag "$prim")"
         log "  $prim"
 
-        run_prim_perf "$prim" "$tag" >>"$raw_csv"
+        if run_prim_perf "$prim" "$tag" >>"$raw_csv"; then
+            rc=0
+        else
+            rc=$?
+            failures=$((failures + 1))
+
+            if [[ "$fail_rc" -eq 0 ]]; then
+                fail_rc="$rc"
+            fi
+        fi
     done
 
     {
@@ -140,6 +151,11 @@ main() {
     log "Done."
     log "Raw CSV    : $raw_csv"
     log "Sorted CSV : $sorted_csv"
+
+    if [[ "$failures" -ne 0 ]]; then
+        log "ERROR: $failures primitive performance run(s) failed. First rc: $fail_rc"
+        exit "$fail_rc"
+    fi
 }
 
 main "$@"
