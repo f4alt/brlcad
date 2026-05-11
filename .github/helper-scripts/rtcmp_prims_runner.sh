@@ -112,6 +112,7 @@ main() {
 
     log "Discovering primitives from: $RTCMP_PRIMS_G"
 
+    local -a prims
     mapfile -t prims < <(discover_prims || true)
     [[ "${#prims[@]}" -gt 0 ]] || die "No primitives found in $RTCMP_PRIMS_G"
 
@@ -121,13 +122,16 @@ main() {
     echo "prim,rays_per_sec" >"$raw_csv"
 
     local prim tag rc
+    local total="${#prims[@]}"
+    local idx=0
     local failures=0
     local fail_rc=0
     for prim in "${prims[@]}"; do
         [[ -n "${prim//[[:space:]]/}" ]] || continue
+        idx=$((idx + 1))
 
         tag="$(safe_tag "$prim")"
-        log "  $prim"
+        log "  [$idx/$total] $prim"
 
         if run_prim_perf "$prim" "$tag" >>"$raw_csv"; then
             rc=0
