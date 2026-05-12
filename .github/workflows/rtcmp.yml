@@ -280,7 +280,7 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          src="$RESULTS_ROOT/summary/run.json"
+          src="$RESULTS_ROOT/summary/summary.json"
           test -f "$src"
 
           short_sha="${GITHUB_SHA::12}"
