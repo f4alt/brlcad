@@ -287,7 +287,7 @@ jobs:
           timestamp="$(date -u +'%Y-%m-%dT%H%M%SZ')"
           run_id="${timestamp}-${short_sha}"
 
-          dest_dir="brlcad_performance_dashboard/data/runs/${run_id}"
+          dest_dir="brlcad_performance_dashboard/data/uploads/${run_id}"
           mkdir -p "$dest_dir"
 
           cp "$src" "$dest_dir/summary.json"
@@ -297,7 +297,7 @@ jobs:
           git config user.name "brlcad-performance-bot"
           git config user.email "brlcad-performance-bot@users.noreply.github.com"
 
-          git add "data/runs/${run_id}/summary.json"
+          git add "data/uploads/${run_id}/summary.json"
 
           if git diff --cached --quiet; then
             echo "No dashboard changes to commit."
