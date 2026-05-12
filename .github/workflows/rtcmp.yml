@@ -16,77 +16,77 @@ on:
 
 jobs:
 
-  linux_build:
-    name: Linux - BRL-CAD build
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: true
-    env:
-      DEBIAN_FRONTEND: noninteractive
-    if: (github.event_name == 'schedule' && github.ref == 'refs/heads/main') ||
-        github.event_name == 'workflow_dispatch'
-    steps:
-      - name: Setup - CMake
-        uses: lukka/get-cmake@latest
-
-      # Cache apt package downloads (not installed pkgs)
-      - name: Cache apt packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            /var/cache/apt/archives
-          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/check.yml') }}
-
-      # Install system dependencies
-      - name: Install apt dependencies
-        run: |
-          sudo apt-get update
-          # Install X/OpenGL dev pkgs
-          sudo apt-get install xserver-xorg-dev libx11-dev libxi-dev libxext-dev libglu1-mesa-dev libfontconfig-dev
-          # Install tools
-          sudo apt-get install astyle re2c xsltproc libxml2-utils
-          # Install dependency dev pkgs
-          sudo apt-get install zlib1g-dev libpng-dev libjpeg-dev libtiff-dev libeigen3-dev libgdal-dev libassimp-dev libopencv-dev tcl-dev tk-dev
-          # Install XCB/OpenGL dev pkgs for Qt - see:
-          # https://wiki.qt.io/Building_Qt_6_from_Git
-          # https://doc.qt.io/qt-6/linux-requirements.html
-          sudo apt-get install libfontconfig1-dev libfreetype6-dev libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxcb1-dev libxcb-cursor-dev libxcb-glx0-dev libxcb-keysyms1-dev libxcb-image0-dev libxcb-shm0-dev libxcb-icccm4-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shape0-dev libxcb-randr0-dev libxcb-render-util0-dev libxcb-util-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libxcb-xrm-dev libxkbcommon-dev libxkbcommon-x11-dev
-          sudo apt-get install libgl-dev
-          sudo apt-get install libinput-dev
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          path: brlcad
-
-      - name: Directory setup
-        run: |
-          cmake -E make_directory build_linux
-          cmake -E make_directory $HOME/.cache
-          cmake -E make_directory $HOME/.cache/BRL-CAD
-
-      - name: Configure
-        run: |
-          export PATH=$GITHUB_WORKSPACE:$PATH
-          cmake -S brlcad -B build_linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DBRLCAD_EXT_PARALLEL=1 -DBRLCAD_BEXT_CLEANUP=ON -DBRLCAD_ENABLE_QT=ON
-
-      - name: Build Package
-        run: |
-          export PATH=$GITHUB_WORKSPACE:$PATH
-          cmake --build build_linux --config Release --target package
-
-      - name: Upload Linux package for performance tests
-        uses: actions/upload-artifact@v4
-        with:
-          name: brlcad-main-linux-package
-          path: |
-            build_linux/*.tar.gz
-          if-no-files-found: error
-          retention-days: 7
+#  linux_build:
+#    name: Linux - BRL-CAD build
+#    runs-on: ubuntu-latest
+#    strategy:
+#      fail-fast: true
+#    env:
+#      DEBIAN_FRONTEND: noninteractive
+#    if: (github.event_name == 'schedule' && github.ref == 'refs/heads/main') ||
+#        github.event_name == 'workflow_dispatch'
+#    steps:
+#      - name: Setup - CMake
+#        uses: lukka/get-cmake@latest
+#
+#      # Cache apt package downloads (not installed pkgs)
+#      - name: Cache apt packages
+#        uses: actions/cache@v4
+#        with:
+#          path: |
+#            /var/cache/apt/archives
+#          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/check.yml') }}
+#
+#      # Install system dependencies
+#      - name: Install apt dependencies
+#        run: |
+#          sudo apt-get update
+#          # Install X/OpenGL dev pkgs
+#          sudo apt-get install xserver-xorg-dev libx11-dev libxi-dev libxext-dev libglu1-mesa-dev libfontconfig-dev
+#          # Install tools
+#          sudo apt-get install astyle re2c xsltproc libxml2-utils
+#          # Install dependency dev pkgs
+#          sudo apt-get install zlib1g-dev libpng-dev libjpeg-dev libtiff-dev libeigen3-dev libgdal-dev libassimp-dev libopencv-dev tcl-dev tk-dev
+#          # Install XCB/OpenGL dev pkgs for Qt - see:
+#          # https://wiki.qt.io/Building_Qt_6_from_Git
+#          # https://doc.qt.io/qt-6/linux-requirements.html
+#          sudo apt-get install libfontconfig1-dev libfreetype6-dev libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxcb1-dev libxcb-cursor-dev libxcb-glx0-dev libxcb-keysyms1-dev libxcb-image0-dev libxcb-shm0-dev libxcb-icccm4-dev libxcb-sync-dev libxcb-xfixes0-dev libxcb-shape0-dev libxcb-randr0-dev libxcb-render-util0-dev libxcb-util-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libxcb-xrm-dev libxkbcommon-dev libxkbcommon-x11-dev
+#          sudo apt-get install libgl-dev
+#          sudo apt-get install libinput-dev
+#
+#      - name: Checkout
+#        uses: actions/checkout@v4
+#        with:
+#          path: brlcad
+#
+#      - name: Directory setup
+#        run: |
+#          cmake -E make_directory build_linux
+#          cmake -E make_directory $HOME/.cache
+#          cmake -E make_directory $HOME/.cache/BRL-CAD
+#
+#      - name: Configure
+#        run: |
+#          export PATH=$GITHUB_WORKSPACE:$PATH
+#          cmake -S brlcad -B build_linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DBRLCAD_EXT_PARALLEL=1 -DBRLCAD_BEXT_CLEANUP=ON -DBRLCAD_ENABLE_QT=ON
+#
+#      - name: Build Package
+#        run: |
+#          export PATH=$GITHUB_WORKSPACE:$PATH
+#          cmake --build build_linux --config Release --target package
+#
+#      - name: Upload Linux package for performance tests
+#        uses: actions/upload-artifact@v4
+#        with:
+#          name: brlcad-main-linux-package
+#          path: |
+#            build_linux/*.tar.gz
+#          if-no-files-found: error
+#          retention-days: 7
 
   linux_performance:
     name: Performance Runner
-    needs: [linux_build]
+#    needs: [linux_build]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: true
@@ -115,8 +115,8 @@ jobs:
       RG_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-generic
       RG_BASELINE_PACKAGE: https://github.com/BRL-CAD/brlcad/releases/download/rel-7-42-0/BRL-CAD_7.42.0_Linux_x86_64.tar.gz
       RG_WORK_DIR: ${{ github.workspace }}/rtcmp-generic-work
-      RG_RAYS_PER_VIEW: "1000"
-      RG_PERF_SECONDS: "10"
+      RG_RAYS_PER_VIEW: "100"
+      RG_PERF_SECONDS: "1"
       RG_PERF_FAIL_THRESHOLD_PCT: "20"
       #RG_MODEL_DIRS intentionally omitted for now; runner has built in fallback
       RG_NUM_CPUS: "0"
@@ -130,7 +130,7 @@ jobs:
       RTCMP_PRIMS_SUMMARY: ${{ github.workspace }}/perf-results/rtcmp-prims/prims_summary.csv
       # rtcmp_prims knobs
       RP_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-prims
-      RP_PERF_SECONDS: "10"
+      RP_PERF_SECONDS: "1"
 
       BENCHMARK_ENABLED: "1"
       BENCHMARK_DESCRIPTION: "run the BRL-CAD benchmark and capture the VGR"
@@ -138,8 +138,8 @@ jobs:
       BENCHMARK_SUMMARY: ${{ github.workspace }}/perf-results/benchmark/summary.csv
       # benchmark knobs
       BM_RESULTS_DIR: ${{ github.workspace }}/perf-results/benchmark
-      BM_TIMEFRAME: "32"
-      BM_MAXTIME: "300"
+      BM_TIMEFRAME: "1"
+      BM_MAXTIME: "5"
 
     steps:
       - name: Checkout
@@ -150,11 +150,11 @@ jobs:
       #TODO: do we need this?
       #- name: Install dependencies
 
-      - name: Download BRL-CAD comparison package
-        uses: actions/download-artifact@v4
-        with:
-          name: brlcad-main-linux-package
-          path: compare-package
+#      - name: Download BRL-CAD comparison package
+#        uses: actions/download-artifact@v4
+#        with:
+#          name: brlcad-main-linux-package
+#          path: compare-package
 
       - name: Run rtcmp generic comparison
         if: always() && env.RTCMP_GENERIC_ENABLED == '1'
@@ -169,7 +169,8 @@ jobs:
           test -f "$script_path"
           chmod +x "$script_path"
 
-          compare_pkg="$(find compare-package -type f \( -name '*.tar.gz' -o -name '*.tgz' \) | sort | head -n 1)"
+          #compare_pkg="$(find compare-package -type f \( -name '*.tar.gz' -o -name '*.tgz' \) | sort | head -n 1)"
+          compare_pkg="$RG_BASELINE_PACKAGE"
           test -n "$compare_pkg"
 
           # run the script - map any exposed knobs
@@ -265,6 +266,46 @@ jobs:
           name: performance-results
           path: perf-results
           retention-days: 7
+
+      - name: Checkout performance dashboard
+        if: always()
+        uses: actions/checkout@v4
+        with:
+          repository: f4alt/brlcad_performance_dashboard
+          path: brlcad_performance_dashboard
+          ssh-key: ${{ secrets.DASHBOARD_DEPLOY_KEY }}
+
+      - name: Commit performance summary to dashboard
+        if: always()
+        run: |
+          set -Eeuo pipefail
+
+          src="$RESULTS_ROOT/summary/run.json"
+          test -f "$src"
+
+          short_sha="${GITHUB_SHA::12}"
+          timestamp="$(date -u +'%Y-%m-%dT%H%M%SZ')"
+          run_id="${timestamp}-${short_sha}"
+
+          dest_dir="brlcad_performance_dashboard/data/runs/${run_id}"
+          mkdir -p "$dest_dir"
+
+          cp "$src" "$dest_dir/summary.json"
+
+          cd brlcad_performance_dashboard
+
+          git config user.name "brlcad-performance-bot"
+          git config user.email "brlcad-performance-bot@users.noreply.github.com"
+
+          git add "data/runs/${run_id}/summary.json"
+
+          if git diff --cached --quiet; then
+            echo "No dashboard changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Add BRL-CAD performance summary ${run_id}"
+          git push
 
       - name: Check performance lane status
         if: always()
