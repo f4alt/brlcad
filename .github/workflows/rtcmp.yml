@@ -170,8 +170,8 @@ jobs:
           chmod +x "$script_path"
 
           #compare_pkg="$(find compare-package -type f \( -name '*.tar.gz' -o -name '*.tgz' \) | sort | head -n 1)"
-          compare_pkg="$RG_BASELINE_PACKAGE"
-          test -n "$compare_pkg"
+          compare_pkg="https://github.com/BRL-CAD/brlcad/releases/download/rel-7-40-2/BRL-CAD_7.40.2_Linux_x86_64.tar.gz"
+          #test -n "$compare_pkg"
 
           # run the script - map any exposed knobs
           WORK_DIR="$RG_WORK_DIR" \
