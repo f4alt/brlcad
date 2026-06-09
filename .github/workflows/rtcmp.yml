@@ -134,6 +134,10 @@ jobs:
       # rtcmp_prims knobs
       RP_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-prims
       RP_PERF_SECONDS: "10"
+      # Per-primitive sampling: discard N warmup runs, then take the median of M
+      # measured runs to try to smooth run-to-run variability
+      RP_WARMUP_RUNS: "2"
+      RP_SAMPLES: "5"
 
       BENCHMARK_ENABLED: "1"
       BENCHMARK_DESCRIPTION: "run the BRL-CAD benchmark and capture the VGR"
@@ -143,7 +147,7 @@ jobs:
       BM_RESULTS_DIR: ${{ github.workspace }}/perf-results/benchmark
       BM_TIMEFRAME: "32"
       BM_MAXTIME: "300"
-      BM_AVERAGE: ""
+      BM_AVERAGE: "5"
 
     steps:
       - name: Checkout
@@ -230,6 +234,8 @@ jobs:
           RTCMP="$compare_rtcmp" \
           OUTDIR="$RP_RESULTS_DIR" \
           PERF_SECONDS="$RP_PERF_SECONDS" \
+          WARMUP_RUNS="$RP_WARMUP_RUNS" \
+          SAMPLES="$RP_SAMPLES" \
           "$script_path"
 
           echo "RTCMP_PRIMS_STATUS=PASS" >> "$GITHUB_ENV"

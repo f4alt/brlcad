@@ -5,6 +5,9 @@ set -Eeuo pipefail
 log() { printf '%s\n' "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
+# -E (errtrace) is set above; surface the failing line on any uncaught error.
+trap 'log "benchmark_runner.sh: command failed (line $LINENO)"' ERR
+
 need_exec() {
     local p="$1"
     [[ -x "$p" ]] || die "Missing or not executable: $p"
@@ -163,8 +166,12 @@ main() {
     local rc=0
     local failures=0
     local fail_rc=0     # note: only first failing rc is captured
+    # Split the space-separated $BENCHMARKS explicitly into an array rather than
+    # relying on unquoted word-splitting.
+    local -a benchmark_list=()
+    read -ra benchmark_list <<< "$BENCHMARKS"
     local benchmark_exe
-    for benchmark_exe in $BENCHMARKS; do
+    for benchmark_exe in "${benchmark_list[@]}"; do
         [[ -n "${benchmark_exe//[[:space:]]/}" ]] || continue
 
         if run_one_benchmark "$benchmark_exe" >> "$summary_csv"; then
