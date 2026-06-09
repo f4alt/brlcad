@@ -93,38 +93,33 @@ benchmark_args() {
 }
 
 check_prereqs() {
-    : "${BENCHMARKS:?BENCHMARKS must be set to a space-separated list of benchmark executables}"
+    : "${BASELINE_BENCHMARK:?BASELINE_BENCHMARK must be set}"
+    : "${COMPARE_BENCHMARK:?COMPARE_BENCHMARK must be set}"
 
     OUTDIR="${OUTDIR:-benchmark_out}"
     OUTDIR="$(abs_dir_path "$OUTDIR")"
+
+    # Fail if compare VGR is more than this% below baseline
+    PERF_FAIL_THRESHOLD_PCT="${PERF_FAIL_THRESHOLD_PCT:-20}"
 }
 
 run_one_benchmark() {
     local benchmark_exe="$1"
+    local label="$2"   # "baseline" or "compare"
 
     benchmark_exe="$(abs_path "$benchmark_exe")"
     need_exec "$benchmark_exe"
 
-    local default_name
-    default_name="$(basename "$(dirname "$(dirname "$benchmark_exe")")")"
-
-    local tag
-    tag="$(safe_tag "$default_name")"
-
-    local build_outdir="$OUTDIR/$tag"
-    local logfile="$build_outdir/benchmark.log"
-
-    local build_name="$default_name"
-    local parsed_name=""
-    local vgr="-1"
-    local rc=0
-
+    local tag build_outdir logfile build_name vgr rc=0
+    tag="$(safe_tag "$label")"
+    build_outdir="$OUTDIR/$tag"
+    logfile="$build_outdir/benchmark.log"
     mkdir -p "$build_outdir"
 
     local -a args
     mapfile -t args < <(benchmark_args)
 
-    log "Running benchmark: $benchmark_exe ${args[*]}"
+    log "Running $label benchmark: $benchmark_exe ${args[*]}"
 
     set +e
     (
@@ -135,62 +130,58 @@ run_one_benchmark() {
     set -e
 
     if [[ "$rc" -ne 0 ]]; then
-        log "ERROR: benchmark failed with exit code $rc; see $logfile"
-        printf '"%s",%s\n' "$build_name" "$vgr"
+        log "ERROR: $label benchmark failed with exit code $rc; see $logfile"
+        echo "-1"
         return "$rc"
     fi
 
-    parsed_name="$(parse_build_name "$logfile")"
-    if [[ -n "$parsed_name" ]]; then
-        build_name="$parsed_name"
-    else
-        log "WARN: unable to parse build name from $logfile; using '$build_name'"
-    fi
+    build_name="$(parse_build_name "$logfile")"
+    [[ -n "$build_name" ]] && log "  $label build: $build_name"
 
     vgr="$(parse_vgr "$logfile")"
     if [[ -z "$vgr" ]]; then
-        log "ERROR: benchmark completed but VGR could not be parsed; see $logfile"
-        printf '"%s",%s\n' "$build_name" "-1"
+        log "ERROR: $label benchmark completed but VGR could not be parsed; see $logfile"
+        echo "-1"
         return 2
     fi
 
-    printf '"%s",%s\n' "$build_name" "$vgr"
+    echo "$vgr"
 }
 
 main() {
     check_prereqs
 
     local summary_csv="$OUTDIR/summary.csv"
-    echo "build,vgr" > "$summary_csv"
+    local bvgr cvgr brc=0 crc=0
 
-    local rc=0
-    local failures=0
-    local fail_rc=0     # note: only first failing rc is captured
-    # Split the space-separated $BENCHMARKS explicitly into an array rather than
-    # relying on unquoted word-splitting.
-    local -a benchmark_list=()
-    read -ra benchmark_list <<< "$BENCHMARKS"
-    local benchmark_exe
-    for benchmark_exe in "${benchmark_list[@]}"; do
-        [[ -n "${benchmark_exe//[[:space:]]/}" ]] || continue
+    bvgr="$(run_one_benchmark "$BASELINE_BENCHMARK" baseline)" || brc=$?
+    cvgr="$(run_one_benchmark "$COMPARE_BENCHMARK"  compare)"  || crc=$?
 
-        if run_one_benchmark "$benchmark_exe" >> "$summary_csv"; then
-            rc=0
-        else
-            rc=$?
-            failures=$((failures + 1))
-            if [[ "$fail_rc" -eq 0 ]]; then
-                fail_rc="$rc"
-            fi
-        fi
-    done
+    # atleast one benchmark failed
+    if [[ "$brc" -ne 0 || "$crc" -ne 0 ]]; then
+        {
+            echo "metric,baseline_vgr,compare_vgr,delta_percent"
+            echo "vgr,${bvgr:--1},${cvgr:--1},-1"
+        } > "$summary_csv"
+        log "Summary: $summary_csv"
+        die "benchmark run failure (baseline rc=$brc, compare rc=$crc)"
+    fi
+
+    # got success and VGR from both benchmarks - compare
+    local delta
+    delta="$(awk -v b="$bvgr" -v c="$cvgr" 'BEGIN { printf "%.2f", (b > 0) ? (c - b) / b * 100 : 0 }')"
+
+    {
+        echo "metric,baseline_vgr,compare_vgr,delta_percent"
+        echo "vgr,$bvgr,$cvgr,$delta"
+    } > "$summary_csv"
 
     log "Summary: $summary_csv"
+    log "VGR baseline=$bvgr compare=$cvgr delta=${delta}% (higher VGR = better)"
 
-    if [[ "$failures" -ne 0 ]]; then
-        # log instead of error so we can bubble rc
-        log "ERROR: $failures benchmark runs(s) failed. First rc: $fail_rc"
-        exit "$fail_rc"
+    # Regression iff compare VGR is more than THRESHOLD% below baseline.
+    if awk -v d="$delta" -v t="$PERF_FAIL_THRESHOLD_PCT" 'BEGIN { exit !(d < -t) }'; then
+        die "benchmark regression: compare VGR ${delta}% vs baseline (threshold -${PERF_FAIL_THRESHOLD_PCT}%)"
     fi
 }
 

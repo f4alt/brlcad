@@ -122,7 +122,7 @@ jobs:
       RG_PERF_SECONDS: "10"
       RG_PERF_FAIL_THRESHOLD_PCT: "20"
       #RG_MODEL_DIRS intentionally omitted for now; runner has built in fallback
-      RG_NUM_CPUS: "0"
+      RG_NUM_CPUS: "1"
       RG_PERF_MAX_MEMORY: "0"
       RG_CLEANUP_OUTPUT_ARTIFACTS: "1"
       RG_LOG_LEVEL: "0"
@@ -138,6 +138,9 @@ jobs:
       # measured runs to try to smooth run-to-run variability
       RP_WARMUP_RUNS: "2"
       RP_SAMPLES: "5"
+      RP_NUM_CPUS: "1"
+      # Fail the lane if any one primitive is <this%
+      RP_PERF_FAIL_THRESHOLD_PCT: "50"
 
       BENCHMARK_ENABLED: "1"
       BENCHMARK_DESCRIPTION: "run the BRL-CAD benchmark and capture the VGR"
@@ -148,6 +151,8 @@ jobs:
       BM_TIMEFRAME: "32"
       BM_MAXTIME: "300"
       BM_AVERAGE: "5"
+      # Fail the benchmark lane if the compare VGR is more than this% below baseline.
+      BM_PERF_FAIL_THRESHOLD_PCT: "20"
 
     steps:
       - name: Checkout
@@ -220,22 +225,28 @@ jobs:
           brl_prefix="$(dirname "$(dirname "$baseline_mged")")"
           prims_g="$brl_prefix/share/db/primitives.g"
           compare_rtcmp="$RG_WORK_DIR/rtcmp-build-compare/rtcmp"
+          baseline_rtcmp="$RG_WORK_DIR/rtcmp-build-baseline/rtcmp"
 
           test -x "$baseline_mged"
           test -f "$prims_g"
           test -x "$compare_rtcmp"
+          test -x "$baseline_rtcmp"
 
           echo "Using MGED: $baseline_mged"
           echo "Using primitives DB: $prims_g"
-          echo "Using rtcmp: $compare_rtcmp"
+          echo "Using compare rtcmp:  $compare_rtcmp"
+          echo "Using baseline rtcmp: $baseline_rtcmp"
 
           RTCMP_PRIMS_G="$prims_g" \
           MGED="$baseline_mged" \
           RTCMP="$compare_rtcmp" \
+          RTCMP_BASELINE="$baseline_rtcmp" \
           OUTDIR="$RP_RESULTS_DIR" \
           PERF_SECONDS="$RP_PERF_SECONDS" \
           WARMUP_RUNS="$RP_WARMUP_RUNS" \
           SAMPLES="$RP_SAMPLES" \
+          NUM_CPUS="$RP_NUM_CPUS" \
+          PERF_FAIL_THRESHOLD_PCT="$RP_PERF_FAIL_THRESHOLD_PCT" \
           "$script_path"
 
           echo "RTCMP_PRIMS_STATUS=PASS" >> "$GITHUB_ENV"
@@ -256,15 +267,17 @@ jobs:
           test -x "$baseline_benchmark"
           compare_benchmark="$(find "$RG_WORK_DIR/brlcad-compare" -type f -path '*/bin/benchmark' -print -quit)"
           test -x "$compare_benchmark"
-          benchmarks="$baseline_benchmark $compare_benchmark"
 
-          echo "Using benchmarks: $benchmarks"
+          echo "Using baseline benchmark: $baseline_benchmark"
+          echo "Using compare benchmark:  $compare_benchmark"
 
-          BENCHMARKS="$benchmarks" \
+          BASELINE_BENCHMARK="$baseline_benchmark" \
+          COMPARE_BENCHMARK="$compare_benchmark" \
           OUTDIR="$BM_RESULTS_DIR" \
           BENCHMARK_TIMEFRAME="$BM_TIMEFRAME" \
           BENCHMARK_MAXTIME="$BM_MAXTIME" \
           BENCHMARK_AVERAGE="$BM_AVERAGE" \
+          PERF_FAIL_THRESHOLD_PCT="$BM_PERF_FAIL_THRESHOLD_PCT" \
           "$script_path"
 
           echo "BENCHMARK_STATUS=PASS" >> "$GITHUB_ENV"

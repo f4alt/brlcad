@@ -215,6 +215,7 @@ log_test_env() {
     log "  NUM_CPUS     : ${NUM_CPUS:-<tests.sh default>}"
     log "  PERF_MAX_MEM : ${PERF_MAX_MEMORY:-<tests.sh default>}"
     log "  PERF_SECONDS : ${PERF_SECONDS:-<tests.sh default>}"
+    log "  FAIL_THRESH% : ${PERF_FAIL_THRESHOLD_PCT:-<tests.sh default>}"
     log "  RAYS_PER_VIEW: ${RAYS_PER_VIEW:-<tests.sh default>}"
 }
 
@@ -240,10 +241,15 @@ run_comparison() {
 
     log_test_env
 
+    # name the gate-relevant knobs explicitly. empty values let tests.sh apply its defaults
     CMD1="$BASELINE_RTCMP" \
     CMD2="$COMPARE_RTCMP" \
     MGED="$BASELINE_PREFIX/bin/mged" \
     OUTDIR="$RESULTS_DIR" \
+    NUM_CPUS="${NUM_CPUS:-1}" \
+    PERF_SECONDS="${PERF_SECONDS:-}" \
+    PERF_MAX_MEMORY="${PERF_MAX_MEMORY:-}" \
+    PERF_FAIL_THRESHOLD_PCT="${PERF_FAIL_THRESHOLD_PCT:-}" \
     "$test_script"
 
     log_section "rtcmp comparison complete"

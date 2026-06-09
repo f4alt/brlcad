@@ -186,6 +186,8 @@ def make_unique_columns(headers: list[str]) -> list[str]:
 def is_numeric_column(key: str) -> bool:
     if key in {
         "vgr",
+        "baseline_vgr",
+        "compare_vgr",
         "bots",
         "bot_faces",
         "breps",
@@ -220,7 +222,12 @@ def coerce_value(lane: str, key: str, value: str) -> Any:
 
     # Primitive failures are emitted as -1 by the shell lane. Convert that to
     # null for the dashboard so failed runs are not graphed as real data.
-    if lane == "rtcmp_prims" and key == "rays_per_sec" and value == "-1":
+    if lane == "rtcmp_prims" and value == "-1" and key in {
+        "baseline_rays_per_sec",
+        "compare_rays_per_sec",
+        "delta_percent",
+        "cv_percent",
+    }:
         return None
 
     if not is_numeric_column(key):
@@ -248,9 +255,11 @@ def csv_rows_to_objects(lane: str, rows: list[list[str]]) -> tuple[list[str], li
             for index, column in enumerate(columns)
         }
 
-        if lane == "rtcmp_prims" and "rays_per_sec" in item:
-            rays = item["rays_per_sec"]
-            item["status"] = "PASS" if isinstance(rays, (int, float)) and rays > 0 else "FAIL"
+        if lane == "rtcmp_prims" and "compare_rays_per_sec" in item:
+            cval = item["compare_rays_per_sec"]
+            item["status"] = "PASS" if isinstance(cval, (int, float)) and cval > 0 else "FAIL"
+            if "status" not in columns:
+                columns.append("status")
 
         objects.append(item)
 
