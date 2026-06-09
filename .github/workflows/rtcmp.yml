@@ -143,6 +143,7 @@ jobs:
       BM_RESULTS_DIR: ${{ github.workspace }}/perf-results/benchmark
       BM_TIMEFRAME: "32"
       BM_MAXTIME: "300"
+      BM_AVERAGE: ""
 
     steps:
       - name: Checkout
@@ -181,6 +182,8 @@ jobs:
           RAYS_PER_VIEW="$RG_RAYS_PER_VIEW" \
           PERF_SECONDS="$RG_PERF_SECONDS" \
           PERF_FAIL_THRESHOLD_PCT="$RG_PERF_FAIL_THRESHOLD_PCT" \
+          NUM_CPUS="$RG_NUM_CPUS" \
+          PERF_MAX_MEMORY="$RG_PERF_MAX_MEMORY" \
           REF="$RG_RTCMP_REF" \
           SHA="$RG_RTCMP_SHA" \
           "$script_path" "$RG_BASELINE_PACKAGE" "$compare_pkg"
@@ -255,6 +258,7 @@ jobs:
           OUTDIR="$BM_RESULTS_DIR" \
           BENCHMARK_TIMEFRAME="$BM_TIMEFRAME" \
           BENCHMARK_MAXTIME="$BM_MAXTIME" \
+          BENCHMARK_AVERAGE="$BM_AVERAGE" \
           "$script_path"
 
           echo "BENCHMARK_STATUS=PASS" >> "$GITHUB_ENV"

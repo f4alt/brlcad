@@ -212,6 +212,8 @@ log_test_env() {
     log "  RTCMP_REF    : ${REF:-<default>}"
     log "  RTCMP_SHA    : ${RTCMP_SHA:-<unknown>}"
     log "  MODEL_DIRS   : ${MODEL_DIRS:-<tests.sh default>}"
+    log "  NUM_CPUS     : ${NUM_CPUS:-<tests.sh default>}"
+    log "  PERF_MAX_MEM : ${PERF_MAX_MEMORY:-<tests.sh default>}"
     log "  PERF_SECONDS : ${PERF_SECONDS:-<tests.sh default>}"
     log "  RAYS_PER_VIEW: ${RAYS_PER_VIEW:-<tests.sh default>}"
 }
