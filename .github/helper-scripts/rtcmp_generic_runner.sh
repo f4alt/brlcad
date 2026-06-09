@@ -180,11 +180,27 @@ build_rtcmp() {
 }
 
 checkout_rtcmp() {
-    log_section "Checking out rtcmp ref: $REF"
+    log_section "Checking out rtcmp ref: $REF${SHA:+ @ $SHA}"
 
-    git clone --depth 1 --branch "$REF" \
+    # Clone the branch ($REF), then pin to an exact commit ($SHA) when provided;
+    # if $SHA is empty we simply track the tip of $REF. Full (non-shallow)
+    # single-branch clone so any commit in $REF's history is checkout-able --
+    # rtcmp is small, so the cost is trivial.
+    git clone --single-branch --branch "$REF" \
         https://github.com/BRL-CAD/rtcmp.git \
         "$RTCMP_SRC_DIR"
+
+    if [ -n "${SHA:-}" ]; then
+        git -C "$RTCMP_SRC_DIR" checkout -q "$SHA"
+    fi
+
+    RTCMP_SHA="$(git -C "$RTCMP_SRC_DIR" rev-parse HEAD)"
+    log "rtcmp checked out: ref=$REF sha=$RTCMP_SHA"
+
+    {
+        printf 'RTCMP_REF=%s\n' "$REF"
+        printf 'RTCMP_SHA=%s\n' "$RTCMP_SHA"
+    } > "$RESULTS_DIR/rtcmp_provenance.env"
 }
 
 log_test_env() {
@@ -193,6 +209,8 @@ log_test_env() {
     log "  CMD2         : $COMPARE_RTCMP"
     log "  MGED         : $BASELINE_PREFIX/bin/mged"
     log "  OUTDIR       : $RESULTS_DIR"
+    log "  RTCMP_REF    : ${REF:-<default>}"
+    log "  RTCMP_SHA    : ${RTCMP_SHA:-<unknown>}"
     log "  MODEL_DIRS   : ${MODEL_DIRS:-<tests.sh default>}"
     log "  PERF_SECONDS : ${PERF_SECONDS:-<tests.sh default>}"
     log "  RAYS_PER_VIEW: ${RAYS_PER_VIEW:-<tests.sh default>}"

@@ -296,6 +296,8 @@ def make_run_metadata(now: datetime) -> dict[str, Any]:
         },
         "baseline": os.environ.get("PERF_BASELINE", ""),
         "candidate": os.environ.get("PERF_CANDIDATE", ""),
+        "rtcmp_ref": os.environ.get("PERF_RTCMP_REF", ""),
+        "rtcmp_sha": os.environ.get("PERF_RTCMP_SHA", ""),
     }
 
 
