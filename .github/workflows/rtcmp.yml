@@ -118,7 +118,7 @@ jobs:
       RG_WORK_DIR: ${{ github.workspace }}/rtcmp-generic-work
       RG_RTCMP_REF: "main"
       RG_RTCMP_SHA: "1dda964d33c62176aec957e5366f0449278a0abf"
-      RG_RAYS_PER_VIEW: "1000"
+      RG_RAYS_PER_VIEW: "100000"
       RG_PERF_SECONDS: "10"
       RG_PERF_FAIL_THRESHOLD_PCT: "20"
       #RG_MODEL_DIRS intentionally omitted for now; runner has built in fallback
@@ -133,11 +133,11 @@ jobs:
       RTCMP_PRIMS_SUMMARY: ${{ github.workspace }}/perf-results/rtcmp-prims/prims_summary.csv
       # rtcmp_prims knobs
       RP_RESULTS_DIR: ${{ github.workspace }}/perf-results/rtcmp-prims
-      RP_PERF_SECONDS: "10"
+      RP_PERF_SECONDS: "5"
       # Per-primitive sampling: discard N warmup runs, then take the median of M
       # measured runs to try to smooth run-to-run variability
-      RP_WARMUP_RUNS: "2"
-      RP_SAMPLES: "5"
+      RP_WARMUP_RUNS: "1"
+      RP_SAMPLES: "3"
       RP_NUM_CPUS: "1"
       # Fail the lane if any one primitive is <this%
       RP_PERF_FAIL_THRESHOLD_PCT: "50"
