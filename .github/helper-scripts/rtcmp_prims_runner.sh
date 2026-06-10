@@ -140,26 +140,31 @@ time_rtcmp() {
 }
 
 # Time a prim against baseline + compare and emit one CSV row:
-# "prim,baseline_rays_per_sec,compare_rays_per_sec,delta_percent,cv_percent".
+# "prim,baseline_rays_per_sec,compare_rays_per_sec,delta_percent,cv_percent,status"
+# where status is PASS | REGRESS | FAIL
 # Returns 1 on a run failure, 2 on a slowdown regression past the threshold.
 run_prim() {
     local prim="$1"
     local tag="$2"
-    local b c bmed cmed ccv delta
+    local b c bmed cmed ccv delta status
 
-    b="$(time_rtcmp "$RTCMP_BASELINE" "$prim" baseline "$tag")" || { echo "$prim,-1,-1,-1,-1"; return 1; }
-    c="$(time_rtcmp "$RTCMP"          "$prim" compare  "$tag")" || { echo "$prim,-1,-1,-1,-1"; return 1; }
+    b="$(time_rtcmp "$RTCMP_BASELINE" "$prim" baseline "$tag")" || { echo "$prim,-1,-1,-1,-1,FAIL"; return 1; }
+    c="$(time_rtcmp "$RTCMP"          "$prim" compare  "$tag")" || { echo "$prim,-1,-1,-1,-1,FAIL"; return 1; }
 
     bmed="${b%% *}"; cmed="${c%% *}"; ccv="${c#* }"
     delta="$(awk -v b="$bmed" -v c="$cmed" 'BEGIN { printf "%.2f", (b > 0) ? (c - b) / b * 100 : 0 }')"
 
-    echo "$prim,$bmed,$cmed,$delta,$ccv"
-
     # Regression iff compare is more than THRESHOLD% slower than baseline
     # (rays/sec is higher-is-better, so a regression is a negative delta).
     if awk -v d="$delta" -v t="$PERF_FAIL_THRESHOLD_PCT" 'BEGIN { exit !(d < -t) }'; then
-        return 2
+        status="REGRESS"
+    else
+        status="PASS"
     fi
+
+    echo "$prim,$bmed,$cmed,$delta,$ccv,$status"
+
+    [[ "$status" == "REGRESS" ]] && return 2
     return 0
 }
 
@@ -185,7 +190,7 @@ main() {
     log "Regression gate: fail if any prim is >${PERF_FAIL_THRESHOLD_PCT}% slower than baseline"
     log "Running primitive performance tests..."
 
-    echo "prim,baseline_rays_per_sec,compare_rays_per_sec,delta_percent,cv_percent" >"$raw_csv"
+    echo "prim,baseline_rays_per_sec,compare_rays_per_sec,delta_percent,cv_percent,status" >"$raw_csv"
 
     local prim tag rc
     local total="${#prims[@]}"
@@ -211,9 +216,9 @@ main() {
     done
 
     {
-        echo "prim,baseline_rays_per_sec,compare_rays_per_sec,delta_percent,cv_percent"
+        echo "prim,baseline_rays_per_sec,compare_rays_per_sec,delta_percent,cv_percent,status"
         tail -n +2 "$raw_csv" |
-            awk -F',' 'NF >= 5 { print $0 }' |
+            awk -F',' 'NF >= 6 { print $0 }' |
             sort -t',' -k3,3nr
     } >"$sorted_csv"
 
