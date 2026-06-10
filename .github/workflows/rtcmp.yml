@@ -13,7 +13,7 @@ name: Performance tests
 
 on:
   workflow_dispatch:
-# Least privilege: the dashboard push authenticates via DASHBOARD_DEPLOY_KEY
+# Least privilege: only repository checkout is needed.
 permissions:
   contents: read
 
@@ -197,13 +197,6 @@ jobs:
           SHA="$RG_RTCMP_SHA" \
           "$script_path" "$RG_BASELINE_PACKAGE" "$compare_pkg"
 
-          # record the resolved rtcmp instrument provenance for the aggregator
-          if [ -f "$RG_RESULTS_DIR/rtcmp_provenance.env" ]; then
-            . "$RG_RESULTS_DIR/rtcmp_provenance.env"
-            echo "PERF_RTCMP_REF=$RTCMP_REF" >> "$GITHUB_ENV"
-            echo "PERF_RTCMP_SHA=$RTCMP_SHA" >> "$GITHUB_ENV"
-          fi
-
           # success
           echo "RTCMP_GENERIC_STATUS=PASS" >> "$GITHUB_ENV"
 
@@ -300,49 +293,6 @@ jobs:
           name: performance-results
           path: perf-results
           retention-days: 7
-
-      - name: Checkout performance dashboard
-        if: always()
-        uses: actions/checkout@v4
-        with:
-          repository: f4alt/brlcad_performance_dashboard
-          path: brlcad_performance_dashboard
-          ssh-key: ${{ secrets.DASHBOARD_DEPLOY_KEY }}
-
-      - name: Commit performance summary to dashboard
-        if: always()
-        run: |
-          set -Eeuo pipefail
-
-          src="$RESULTS_ROOT/summary/summary.json"
-          if [ ! -f "$src" ]; then
-            echo "ERROR: aggregator produced no summary.json at $src" >&2
-            exit 1
-          fi
-
-          short_sha="${GITHUB_SHA::12}"
-          timestamp="$(date -u +'%Y-%m-%dT%H%M%SZ')"
-          run_id="${timestamp}-${short_sha}"
-
-          dest_dir="brlcad_performance_dashboard/data/uploads/${run_id}"
-          mkdir -p "$dest_dir"
-
-          cp "$src" "$dest_dir/summary.json"
-
-          cd brlcad_performance_dashboard
-
-          git config user.name "brlcad-performance-bot"
-          git config user.email "brlcad-performance-bot@users.noreply.github.com"
-
-          git add "data/uploads/${run_id}/summary.json"
-
-          if git diff --cached --quiet; then
-            echo "No dashboard changes to commit."
-            exit 0
-          fi
-
-          git commit -m "Add BRL-CAD performance summary ${run_id}"
-          git push
 
       - name: Check performance lane status
         if: always()
