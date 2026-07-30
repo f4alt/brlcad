@@ -63,8 +63,6 @@ struct cell {
     vect_t	c_rdir;			/* ray direction, permits perspective */
 };
 
-extern size_t	width;			/* # of pixels in X; picture width */
-
 fastf_t		pit_depth;		/* min. distance for drawing pits/mountains */
 fastf_t		maxangle;		/* value of the cosine of the angle bet. surface normals that triggers shading */
 
@@ -82,7 +80,7 @@ struct bu_structparse view_parse[] = {
 };
 
 
-const char title[] = "RT Hidden-Line Plot";
+EXTERNCPP const char title[] = "RT Hidden-Line Plot";
 
 int	rayhit(register struct application *ap, struct partition *PartHeadp, struct seg *);
 int	raymiss(register struct application *ap);
@@ -664,7 +662,7 @@ cleanline(struct cell *inbuffp, int file_width)
 }
 
 
-void
+C_DECL void
 application_init (void)
 {
     option("", "-A angle", "Angle between surface normals (default=5degrees)", 0);

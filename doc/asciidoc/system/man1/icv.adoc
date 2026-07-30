@@ -4,108 +4,158 @@
 :manmanual: BRL-CAD
 
 == NAME
-icv - Convert images to and from various formats
+
+icv - convert, compare, and report information for image formats
 
 == SYNOPSIS
 
 [source]
 ----
-icv [-h] [-i file] [--input-format fmt] [-o file] [--output-format fmt] [-w width] [input_file] [output_file]
+icv [-w width] [-n height] [--input-format fmt] [--output-format fmt] [-i input] [-o output] [input] [output]
+icv info file [file ...]
+icv diff [options] img1 img2
+icv anim <action> <anim_file> ...
 ----
-
 
 [[description]]
 == DESCRIPTION
 
-*icv* is a tool to convert images to and from a variety of image formats. Currently support formats include:
+Without a subcommand, *icv* acts as an image format converter, reading the input image and writing it to the output file. Image formats are auto-detected from file extensions unless overridden with *--input-format* / *--output-format*. To stream through standard input or output (a path of which carries no extension) the corresponding format must be given explicitly. This tool is intended to eventually replace the family of single-purpose *pix-png*(1), *png-pix*(1), *bw-pix*(1) and similar converters.
 
-.Supported ICV Image Formats
+=== Supported Formats
+
 [cols="2*"]
 |===
-|Format
-|Extension
+|Format |Extension
 
-|PIX - pixel sequence of R/G/B values stored as unsigned chars.
-|pix
-|Double PIX - double precision pixel sequence
+|Black and White (Grayscale)
+|bw
+
+|Double Precision Pixel (R/G/B/A double)
 |dpix
+
+|Pixel Sequence (R/G/B unsigned char)
+|pix
+
 |Portable Network Graphics
 |png
-|PPM - "lowest common denominator" Netbpm color iamge format
+
+|Portable Pixmap
 |ppm
-|BW - black and white image data
-|bw
-|(TODO) Utah Raster Toolkit Run-Length Encoded (RLE)
-|rle
 |===
 
+=== Subcommands
 
+*info*::
+	Report the width, height, format, number of channels, color space, and any embedded render information (like the database and objects used to render it) for the specified image file(s).
 
+*diff*::
+	Compare two images and report per-channel match statistics on standard error. When the images differ and no output file is given, a raw PIX difference image is written to standard output (only if stdout is not a terminal), matching the behaviour of *pixdiff*(1). Use *-o* to write the diff image to a named file instead.
+
+*anim*::
+	Manage animation files (APNG, MJPG). Supports actions for adding, extracting, replacing, inserting, and removing frames, as well as setting animation playback speed and per-frame delays.
 
 [[options]]
 == OPTIONS
 
-File types will be deduced unless explicitly specfied with the *input-format* and/or *output-format* options. For file types like PIX that do not encode dimensional information, *icv* will attempt to guess the image size based on various assumptions (a square image, known sizes for image displays, paper sizes at various dots-per-inch, etc.). If the users does know the correct image width and height, they may be specified with the *w* and *n* options.
-
-
-*-h*, *--help*::
-Print help and exit.
-
+=== Conversion Options
 
 *-i* _file_, *--input* _file_::
-Specify an input file. If none is specified, the first non-option-related argument will be used as the input file name.
-
+	Specify the input file name. If not specified, the first positional argument is used.
 
 *-o* _file_, *--output* _file_::
-Specify an input file. If none is specified, the second non-option-related argument will be used as the output file name.
+	Specify the output file name. If not specified, the second positional argument is used.
 
+*-w* _width_, *--width* _width_::
+	Specify the width of the input image. Required for raw formats (like PIX and BW) that do not encode dimensional information, unless the size can be automatically deduced from the file size.
 
-*-w* _#_, *--width* _#_::
-Specify the width of the input image. Useful for file types such as PIX that do not encode explicit size information.
-
-
-*-n* _#_, *--height* _#_::
-Specify the height of the input image. Useful for file types such as PIX that do not encode explicit size information.
-
+*-n* _height_, *--height* _height_::
+	Specify the height of the input image. Required for raw formats (like PIX and BW) that do not encode dimensional information.
 
 *--input-format* _fmt_::
-Explicitly specify input file format.
-
+	Explicitly set the input image format (e.g., `png`, `pix`, `bw`).
 
 *--output-format* _fmt_::
-Explicitly specify output file format.
+	Explicitly set the output image format.
 
+*-h*, *--help*::
+*-?*::
+	Print conversion help and exit.
 
+=== Diff Subcommand Options
 
+*-o* _file_, *--output* _file_::
+	Specify a file path to save the diff image output.
 
-[[example]]
-== EXAMPLE
+*--output-format* _format_::
+	Explicitly set the format of the output diff image.
 
+*--format-img1* _format_::
+	Explicitly set the format of the first input image.
 
-....
+*--format-img2* _format_::
+	Explicitly set the format of the second input image.
 
-      icv -w 1024 -n 512 tank.pix tank.png
-    
-....
+*--width-img1* _#_::
+	Specify the width of the first input image (raw formats only).
 
+*--height-img1* _#_::
+	Specify the height of the first input image (raw formats only).
+
+*--width-img2* _#_::
+	Specify the width of the second input image (raw formats only).
+
+*--height-img2* _#_::
+	Specify the height of the second input image (raw formats only).
+
+*-h*, *--help*::
+*-?*::
+	Print diff subcommand help and exit.
+
+[[examples]]
+== EXAMPLES
+
+.Convert a raw PIX render to PNG
+====
+[source,bash]
+----
+icv -w 1024 -n 512 render.pix render.png
+----
+Reads a headerless 1024x512 PIX file and writes a PNG. The dimensions are required because PIX (and BW) carry no size information in the file; when omitted, *icv* attempts to deduce them from the file size.
+====
+
+.Inspect images before further processing
+====
+[source,bash]
+----
+icv info *.png
+----
+Reports the width, height, format, channel count, color space, and any embedded render information (originating database and objects) for every PNG in the directory, useful for confirming a batch of renders is consistent before compositing.
+====
+
+.Regression-test a render against a known-good reference
+====
+[source,bash]
+----
+icv diff -o delta.png reference.png current.png
+----
+Compares two renders, prints per-channel match statistics to standard error, and writes a highlighted difference image to delta.png. Omitting *-o* streams a raw PIX diff to standard output for piping, exactly as *pixdiff*(1) does.
+====
 
 [[see_also]]
 == SEE ALSO
 
-*pix*(5) *bw*(5)
-
+*brlcad*(1), *pixdiff*(1), *pix-png*(1), *png-pix*(1), *bw-pix*(1), *pix*(5), *bw*(5)
 
 [[author]]
 == AUTHOR
 
-Clifford Yapp
-
+BRL-CAD Team
 
 [[copyright]]
 == COPYRIGHT
 
 This software is Copyright (c) 1989-2026 by the United States Government as represented by U.S. Army Research Laboratory.
-
 
 [[bug_reports]]
 == BUG REPORTS

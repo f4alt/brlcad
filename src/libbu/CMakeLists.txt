@@ -29,6 +29,8 @@ build_cfg_hdr("${BU_MIME_TYPES_H_FILE}" ${INCLUDE_DIR}/brlcad/bu)
 # failure if it hasn't been built yet.
 add_subdirectory(brledit)
 
+brlcad_check_library(EXECINFO execinfo backtrace)
+
 set(
   LIBBU_SOURCES
   affinity.c
@@ -86,6 +88,7 @@ set(
   observer.c
   opt.c
   parallel.c
+  parallel_cpp11thread.cpp
   parse.c
   path.c
   path_normalize.c
@@ -124,14 +127,19 @@ set(
   xdr.c
 )
 
-if(NOT CMAKE_CXX_STANDARD EQUAL 98)
-  set(LIBBU_SOURCES ${LIBBU_SOURCES} parallel_cpp11thread.cpp)
-else(NOT CMAKE_CXX_STANDARD EQUAL 98)
-endif(NOT CMAKE_CXX_STANDARD EQUAL 98)
+# bitv is C only - keep it that way even when we are compiling
+# the rest of the sources as C++
+set_source_files_properties(bitv.c PROPERTIES NO_CXX_COMPILE TRUE)
+
+# UUID static arrays use C99 array-parameter syntax, which is not
+# valid C++. bu/uuid.h is thus C only - flag the two libbu files
+# that use it accordingly.
+set_source_files_properties(uuid.c PROPERTIES NO_CXX_COMPILE TRUE)
+set_source_files_properties(vls.c PROPERTIES NO_CXX_COMPILE TRUE)
 
 # Note - libbu_deps is defined by ${BRLCAD_SOURCE_DIR}/src/source_dirs.cmake
 set(
-  BU_LIBS
+  BU_PRIVATE_LIBS
   ${Foundation_LIBRARIES}
   Threads::Threads
   ${libbu_deps}
@@ -139,8 +147,9 @@ set(
   ${WINSOCK_LIB}
   ${PSAPI_LIB}
   ${BSON_LIBRARIES}
-  ${LMDB_LIBRARIES}
+  LMDB::LMDB
   ${UUID_LIBRARIES}
+  ${EXECINFO_LIBRARY}
   ${M_LIBRARY}
 )
 
@@ -150,7 +159,8 @@ set(BU_INCLUDE_DIRS ${BRLCAD_BINARY_DIR}/include ${BRLCAD_SOURCE_DIR}/include)
 # locally used but not needed by users of the library
 set(BU_LOCAL_INCLUDE_DIRS ${BSON_INCLUDE_DIR} ${LMDB_INCLUDE_DIR} ${UUID_INCLUDE_DIR})
 
-brlcad_addlib(libbu "${LIBBU_SOURCES}" "${BU_LIBS}" "${BU_INCLUDE_DIRS}" "${BU_LOCAL_INCLUDE_DIRS}"
+brlcad_addlib(libbu "${LIBBU_SOURCES}" "${BU_INCLUDE_DIRS}" "${BU_LOCAL_INCLUDE_DIRS}"
+  PRIVATE_LIBS ${BU_PRIVATE_LIBS}
   UNITY_BUILD_SKIP
   backtrace.c
   bu_init.cpp
@@ -169,7 +179,7 @@ brlcad_addlib(libbu "${LIBBU_SOURCES}" "${BU_LIBS}" "${BU_INCLUDE_DIRS}" "${BU_L
 set_target_properties(libbu PROPERTIES VERSION 20.0.1 SOVERSION 20)
 
 set(bu_atgts)
-set(bu_targets libbu-obj libbu libbu-static)
+set(bu_targets libbu-obj libbu-brlcad-obj libbu libbu-static)
 foreach(bt ${bu_targets})
   if(TARGET ${bt})
     list(APPEND bu_atgts ${bt})
@@ -201,7 +211,9 @@ endforeach(bt ${bu_atgts})
 if(${BRLCAD_OPTIMIZED} MATCHES "ON")
   check_c_compiler_flag(-Wno-stringop-overflow HAVE_NO_STRINGOP_OVERFLOW)
   if(HAVE_NO_STRINGOP_OVERFLOW)
-    target_link_options(libbu PRIVATE -Wno-stringop-overflow)
+    foreach(bt ${bu_atgts})
+      target_link_options(${bt} PRIVATE -Wno-stringop-overflow)
+    endforeach()
   endif(HAVE_NO_STRINGOP_OVERFLOW)
 endif(${BRLCAD_OPTIMIZED} MATCHES "ON")
 
@@ -223,7 +235,6 @@ set(
   parallel.h
   parallel_cpp11thread.cpp
   process.h
-  tests/semchk.cpp
   sha1.h
   vfont.h
   vls_vprintf.h

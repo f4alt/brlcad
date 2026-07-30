@@ -48,52 +48,25 @@
 #  include <X11/extensions/XInput.h>
 #endif /* HAVE_X11_XINPUT_H */
 
-/* glx.h on Mac OS X (and perhaps elsewhere) defines a slew of
- * parameter names that shadow system symbols.  protect the system
- * symbols by redefining the parameters prior to header inclusion.
- */
-#define j1 J1
-#define y1 Y1
-#define read rd
-#define index idx
-#define access acs
-#define remainder rem
-#ifdef HAVE_GL_GLX_H
-#  include <GL/glx.h>
-#  ifdef HAVE_XRENDER
-#    include <X11/extensions/Xrender.h>
-#  endif
-#endif
-#ifdef HAVE_GL_GL_H
-#  include <GL/gl.h>
-#endif
-
-#undef remainder
-#undef access
-#undef index
-#undef read
-#undef y1
-#undef j1
-
 #include "png.h"
-
-#include "tk.h"
 
 #if defined(__clang__)
 #  pragma clang diagnostic pop /* end ignoring warnings */
 #endif
 
-
 #undef VMIN		/* is used in vmath.h, too */
 
 #include "vmath.h"
 #include "bn.h"
+#include "bu/file.h"
+#include "bu/process.h"
 #include "bv/defines.h"
 #include "dm.h"
 #include "../null/dm-Null.h"
-#include "../dm-gl.h"
 #include "./fb_ogl.h"
 #include "./dm-ogl.h"
+
+#include "tk.h"
 
 #include "../include/private.h"
 
@@ -109,6 +82,34 @@
 #define YOFFSET_LEFT	532	/* YSTEREO + YBLANK ? */
 
 static XVisualInfo *ogl_choose_visual(struct dm *dmp, Tk_Window tkwin);
+
+static int
+ogl_runtime_probe(const char *dpy_string)
+{
+#ifdef __APPLE__
+    const char *probe_path = bu_dir(NULL, 0, BU_DIR_BIN, "dm_ogl_probe", BU_DIR_EXT, NULL);
+    const char *probe_av[3] = {NULL, NULL, NULL};
+    struct bu_process *p = NULL;
+    int rc = 0;
+
+    if (!probe_path || !bu_file_executable(probe_path)) {
+	return 0;
+    }
+
+    probe_av[0] = probe_path;
+    if (dpy_string && dpy_string[0] != '\0') {
+	probe_av[1] = dpy_string;
+    }
+
+    bu_process_create(&p, probe_av, BU_PROCESS_DEFAULT);
+    rc = bu_process_wait_n(&p, 3000);
+
+    return (rc == 0) ? 1 : -1;
+#else
+    (void)dpy_string;
+    return 0;
+#endif
+}
 
 /* Display Manager package interface */
 #define IRBOUND 4095.9	/* Max magnification in Rot matrix */
@@ -519,6 +520,12 @@ ogl_viable(const char *dpy_string)
 {
     Display *dpy;
     int return_val;
+
+    return_val = ogl_runtime_probe(dpy_string);
+    if (return_val != 0) {
+	return return_val;
+    }
+
     if ((dpy = XOpenDisplay(dpy_string)) != NULL) {
 	if (XQueryExtension(dpy, "GLX", &return_val, &return_val, &return_val)) {
 	    XCloseDisplay(dpy);
@@ -1329,7 +1336,10 @@ ogl_write_image(struct bu_vls *msgs, FILE *fp, struct dm *dmp)
 		dbyte3 = dbyte0 + 3;
 
 		*dbyte0 = (pixel & ximage_p->red_mask) >> red_shift;
-		*dbyte1 = (pixel & ximage_p->green_mask) >> green_shift;
+		if (0 <= green_shift)
+		    *dbyte1 = (pixel & ximage_p->green_mask) >> green_shift;
+		else
+		    *dbyte1 = (pixel & ximage_p->green_mask) << -green_shift;
 		*dbyte2 = (pixel & ximage_p->blue_mask) >> blue_shift;
 		*dbyte3 = 255;
 	    }
@@ -1355,7 +1365,10 @@ ogl_write_image(struct bu_vls *msgs, FILE *fp, struct dm *dmp)
 		else
 		    *dbyte0 = (pixel & ximage_p->red_mask) << -red_shift;
 
-		*dbyte1 = (pixel & ximage_p->green_mask) >> green_shift;
+		if (0 <= green_shift)
+		    *dbyte1 = (pixel & ximage_p->green_mask) >> green_shift;
+		else
+		    *dbyte1 = (pixel & ximage_p->green_mask) << -green_shift;
 
 		if (0 <= blue_shift)
 		    *dbyte2 = (pixel & ximage_p->blue_mask) >> blue_shift;

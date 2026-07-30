@@ -65,9 +65,12 @@ macro(GENERATE_SCHEMA_INPUTS SCHEMA_FILE TARGET_SUFFIX)
     # We want to precompile the generated headers, since they will be reused a
     # great deal in the build.  However, for CMake's target_precompile_headers
     # function we need a file that exists at configure time to act as the
-    # target.
-    set(PRECOMPILE_HEADER ${SCHEMA_OUT_DIR}/precompile_${TARGET_SUFFIX}.h)
+    # target.  Keep that header outside the exp2cxx output directory: the
+    # generator can clear or overwrite files in SCHEMA_OUT_DIR, which leaves
+    # the later PCH compile trying to include a header that no longer exists.
+    set(PRECOMPILE_HEADER ${CMAKE_CURRENT_BINARY_DIR}/precompile_${SCHEMA_NAME}_${TARGET_SUFFIX}.h)
     file(WRITE "${PRECOMPILE_HEADER}" "// Precompiled header for STEPcode generated files\n")
+    distclean("${PRECOMPILE_HEADER}")
     foreach(header ${express_hdrs})
       # Use relative include for portability
       get_filename_component(header_name "${header}" NAME)
@@ -78,7 +81,6 @@ macro(GENERATE_SCHEMA_INPUTS SCHEMA_FILE TARGET_SUFFIX)
       EXPRESS_OUTPUT
       ${express_srcs}
       ${express_hdrs}
-      ${PRECOMPILE_HEADER}
     )
 
     add_custom_command(
@@ -101,6 +103,7 @@ macro(GENERATE_SCHEMA_INPUTS SCHEMA_FILE TARGET_SUFFIX)
     set(
       clean_files
       ${EXPRESS_OUTPUT}
+      ${PRECOMPILE_HEADER}
       ${SCHEMA_OUT_DIR}/step_express_${SCHEMA_NAME}.done
       ${SCHEMA_OUT_DIR}/step_express_${SCHEMA_NAME}.log
     )

@@ -278,7 +278,7 @@ rt_comb_v5_serialize(
 }
 
 
-int
+C_DECL int
 rt_comb_export5(
     struct bu_external *ep,
     const struct rt_db_internal *ip,
@@ -516,7 +516,7 @@ _comb_mat_leaf(const mat_t mat, union tree *tp)
     }
 }
 
-int
+C_DECL int
 rt_comb_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !mat)
@@ -871,7 +871,7 @@ finish:
  * Sets the result string to a description of the given combination.
  * Entered via OBJ[].ft_get().
  */
-int
+C_DECL int
 rt_comb_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *item)
 {
     const struct rt_comb_internal *comb;
@@ -985,8 +985,8 @@ rt_comb_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const ch
  *
  * Invoked via OBJ[ID_COMBINATION].ft_adjust()
  */
-int
-rt_comb_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, char **argv)
+C_DECL int
+rt_comb_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv)
 {
     struct rt_comb_internal *comb;
     char buf[1024] = {'\0'};
@@ -1146,7 +1146,7 @@ not_region:
 }
 
 
-int
+C_DECL int
 rt_comb_form(struct bu_vls *logstr, const struct rt_functab *ftp)
 {
     RT_CK_FUNCTAB(ftp);
@@ -1161,8 +1161,8 @@ rt_comb_form(struct bu_vls *logstr, const struct rt_functab *ftp)
  * Create a blank combination with appropriate values.  Called via
  * OBJ[ID_COMBINATION].ft_make().
  */
-void
-rt_comb_make(const struct rt_functab *UNUSED(ftp), struct rt_db_internal *intern)
+C_DECL int
+rt_comb_make(const struct rt_functab *UNUSED(ftp), struct rt_db_internal *intern, const char *UNUSED(variant), const point_t UNUSED(origin), double UNUSED(scale))
 {
     struct rt_comb_internal *comb;
 
@@ -1175,6 +1175,7 @@ rt_comb_make(const struct rt_functab *UNUSED(ftp), struct rt_db_internal *intern
     RT_COMB_INTERNAL_INIT(comb);
     bu_vls_init(&comb->shader);
     bu_vls_init(&comb->material);
+    return BRLCAD_OK;
 }
 
 
@@ -1226,7 +1227,7 @@ facetize_region_end(struct db_tree_state *tsp,
  * current.  ONLY use comb methods on rt_db_internals when they are associated
  * with a current, valid dbip.
  */
-int
+C_DECL int
 rt_comb_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, const struct bg_tess_tol *ttol, const struct bn_tol *tol)
 {
     if (!r || !m  || !ip || !ttol || !tol)
@@ -1336,15 +1337,15 @@ comb_crofton_sample(const struct rt_db_internal *ip, double *out_sa, double *out
 
     RT_CK_DBI(comb->src_dbip);
 
-    struct rt_i *rtip = rt_new_rti((struct db_i *)comb->src_dbip);
+    struct rt_i *rtip = rt_i_create((struct db_i *)comb->src_dbip);
     if (!rtip) {
-	bu_log("rt_comb_volume/surf_area: rt_new_rti() failed\n");
+	bu_log("rt_comb_volume/surf_area: rt_i_create() failed\n");
 	return -1;
     }
 
     if (rt_gettree(rtip, comb->src_objname) < 0) {
 	bu_log("rt_comb_volume/surf_area: rt_gettree() failed for '%s'\n", comb->src_objname);
-	rt_free_rti(rtip);
+	rt_i_destroy(rtip);
 	return -1;
     }
 
@@ -1353,17 +1354,17 @@ comb_crofton_sample(const struct rt_db_internal *ip, double *out_sa, double *out
     double sa  = 0.0;
     double vol = 0.0;
     /* Use default params (NULL → 2 000-ray convergence loop) */
-    (void)rt_crofton_shoot(rtip, NULL, &sa, &vol);
+    (void)rt_crofton_shoot(&sa, &vol, rtip, NULL, NULL, NULL);
 
     if (out_sa)  *out_sa  = sa;
     if (out_vol) *out_vol = vol;
 
-    rt_free_rti(rtip);
+    rt_i_destroy(rtip);
     return 0;
 }
 
 
-void
+C_DECL void
 rt_comb_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 {
     if (!area || !ip)
@@ -1374,7 +1375,7 @@ rt_comb_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_comb_volume(fastf_t *vol, const struct rt_db_internal *ip)
 {
     if (!vol || !ip)

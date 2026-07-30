@@ -57,8 +57,10 @@
 #include "common.h"
 
 #include <climits>
+#include <cstdint>
 #include <stdlib.h>
 #include <math.h>
+#include <random>
 #include <string.h>
 #include <time.h>
 
@@ -91,6 +93,14 @@
 /** Convergence threshold (%) for the functab fallback.               */
 #define RT_CROFTON_DEFAULT_THRESHOLD 1.0
 
+/** Minimum evidence before applying stability-based stopping.         */
+#define RT_CROFTON_STABILITY_MIN_RAYS      20000u
+#define RT_CROFTON_STABILITY_MIN_CROSSINGS 500u
+#define RT_CROFTON_STABILITY_MIN_WINDOWS   2u
+
+/** Fixed seed for reproducible estimates in tests and cross-platform runs. */
+#define RT_CROFTON_RNG_SEED 0x9e3779b97f4a7c15ULL
+
 
 /* ------------------------------------------------------------------ */
 /* Internal types                                                       */
@@ -106,8 +116,6 @@ struct crofton_shared {
     size_t  total_crossings; /* in+out hit events */
     double  total_chord;     /* solid segment length sum (mm) */
     size_t  total_rays;      /* rays fired (hits + misses) */
-    /* Synchronisation */
-    int     sem_stats;
 };
 
 struct crofton_worker_data {
@@ -116,6 +124,9 @@ struct crofton_worker_data {
     size_t                 start;
     size_t                 end;
     struct crofton_shared *shared;
+    size_t                 local_crossings;
+    double                 local_chord;
+    size_t                 local_rays;
 };
 
 
@@ -127,7 +138,6 @@ static int
 crofton_hit(struct application *ap, struct partition *PartHeadp, struct seg *UNUSED(segs))
 {
     struct crofton_worker_data *wd = (struct crofton_worker_data *)ap->a_uptr;
-    struct crofton_shared      *sh = wd->shared;
 
     size_t crossings = 0;
     double chord     = 0.0;
@@ -139,11 +149,9 @@ crofton_hit(struct application *ap, struct partition *PartHeadp, struct seg *UNU
 	chord += pp->pt_outhit->hit_dist - pp->pt_inhit->hit_dist;
     }
 
-    bu_semaphore_acquire(sh->sem_stats);
-    sh->total_crossings += crossings;
-    sh->total_chord     += chord;
-    sh->total_rays      += 1;
-    bu_semaphore_release(sh->sem_stats);
+    wd->local_crossings += crossings;
+    wd->local_chord     += chord;
+    wd->local_rays      += 1;
 
     return 1;
 }
@@ -153,11 +161,7 @@ static int
 crofton_miss(struct application *ap)
 {
     struct crofton_worker_data *wd = (struct crofton_worker_data *)ap->a_uptr;
-    struct crofton_shared      *sh = wd->shared;
-
-    bu_semaphore_acquire(sh->sem_stats);
-    sh->total_rays += 1;
-    bu_semaphore_release(sh->sem_stats);
+    wd->local_rays += 1;
 
     return 0;
 }
@@ -188,17 +192,17 @@ crofton_worker(int id, void *data)
 /* ------------------------------------------------------------------ */
 
 static double
-crofton_rand01(void)
+crofton_rand01(std::mt19937_64 &rng)
 {
-    return (double)rand() / ((double)RAND_MAX + 1.0);
+    return std::generate_canonical<double, 53>(rng);
 }
 
 
 static void
-random_point_on_sphere(double radius, const point_t center, point_t out)
+random_point_on_sphere(double radius, const point_t center, point_t out, std::mt19937_64 &rng)
 {
-    double theta = 2.0 * M_PI * crofton_rand01();
-    double phi   = acos(2.0 * crofton_rand01() - 1.0);
+    double theta = 2.0 * M_PI * crofton_rand01(rng);
+    double phi   = acos(2.0 * crofton_rand01(rng) - 1.0);
     double sp    = sin(phi);
     out[X] = center[X] + radius * sp * cos(theta);
     out[Y] = center[Y] + radius * sp * sin(theta);
@@ -213,17 +217,17 @@ random_point_on_sphere(double radius, const point_t center, point_t out)
  */
 static void
 generate_rays(struct crofton_ray *rays, size_t nrays,
-	      double radius, const point_t center)
+	      double radius, const point_t center, std::mt19937_64 &rng)
 {
     size_t npts = nrays * 2;
 
     point_t *pts = (point_t *)bu_calloc(npts, sizeof(point_t), "crofton pts");
     for (size_t i = 0; i < npts; i++)
-	random_point_on_sphere(radius, center, pts[i]);
+	random_point_on_sphere(radius, center, pts[i], rng);
 
     /* Shuffle so pairing is random */
     for (size_t i = npts - 1; i > 0; i--) {
-	size_t j = (size_t)(crofton_rand01() * (i + 1));
+	size_t j = (size_t)(crofton_rand01(rng) * (i + 1));
 	if (j > i) j = i;
 	point_t tmp;
 	VMOVE(tmp, pts[i]);
@@ -251,15 +255,17 @@ do_one_iteration(struct application *ap_template,
 		 size_t              nrays,
 		 double              radius,
 		 const point_t       center,
-		 struct crofton_shared *shared)
+		 struct crofton_shared *shared,
+		 std::mt19937_64      &rng)
 {
     struct crofton_ray *rays = (struct crofton_ray *)bu_calloc(
 	nrays, sizeof(struct crofton_ray), "crofton rays");
 
-    generate_rays(rays, nrays, radius, center);
+    generate_rays(rays, nrays, radius, center, rng);
 
     size_t ncpus = bu_avail_cpus();
     if (ncpus < 1) ncpus = 1;
+    if (ncpus > MAX_PSW) ncpus = MAX_PSW;
 
     struct crofton_worker_data *wdata = (struct crofton_worker_data *)bu_calloc(
 	ncpus, sizeof(struct crofton_worker_data), "crofton wdata");
@@ -283,6 +289,12 @@ do_one_iteration(struct application *ap_template,
 
     bu_parallel(crofton_worker, (int)ncpus, (void *)wdata);
 
+    for (size_t i = 0; i < ncpus; i++) {
+	shared->total_crossings += wdata[i].local_crossings;
+	shared->total_chord     += wdata[i].local_chord;
+	shared->total_rays      += wdata[i].local_rays;
+    }
+
     for (size_t i = 0; i < ncpus; i++)
 	bu_free(wdata[i].ap, "crofton app");
     bu_free(wdata, "crofton wdata");
@@ -299,22 +311,27 @@ do_one_iteration(struct application *ap_template,
  * raytrace instance @p rtip, using the stopping criteria in @p params.
  *
  * The caller is responsible for creating, preparing (rt_prep_parallel),
- * and freeing (rt_free_rti) @p rtip.  This function does NOT call
- * rt_free_rti.
+ * and freeing (rt_i_destroy) @p rtip.  This function does NOT call
+ * rt_i_destroy.
  *
+ * @param out_surf_area Receives the estimated surface area (mm^2).
+ * @param out_volume    Receives the estimated volume (mm^3).
  * @param rtip         Prepared raytrace instance (rt_prep_parallel must
  *                     have been called before this function).
  * @param params       Stopping criteria (see struct rt_crofton_params).
- *                     NULL or all-zero → 2 000-ray default behaviour.
- * @param out_surf_area Receives the estimated surface area (mm^2).
- * @param out_volume    Receives the estimated volume (mm^3).
- * @return  0 on success, -1 on bad arguments.
+ *                     NULL or all-zero -> 2 000-ray default behaviour.
+ * @param bbox_min     Optional focused sampling bbox minimum, or NULL.
+ * @param bbox_max     Optional focused sampling bbox maximum, or NULL.
+ * @return  The total number of ray-surface crossings accumulated during
+ *          sampling (>= 0) on success; -1 on bad arguments.
  */
 int
-rt_crofton_shoot(struct rt_i                      *rtip,
-		 const struct rt_crofton_params   *params,
-		 double                           *out_surf_area,
-		 double                           *out_volume)
+rt_crofton_shoot(double                         *out_surf_area,
+		 double                         *out_volume,
+		 struct rt_i                    *rtip,
+		 const struct rt_crofton_params *params,
+		 const fastf_t                  *bbox_min,
+		 const fastf_t                  *bbox_max)
 {
     if (!rtip || (!out_surf_area && !out_volume))
 	return -1;
@@ -334,32 +351,39 @@ rt_crofton_shoot(struct rt_i                      *rtip,
      * and use their union RPP to build the Crofton sphere.  For large geometry
      * that already spans integer-mm boundaries the result is identical to the
      * old rti_radius / mdl_min / mdl_max path.                              */
-    point_t tight_min, tight_max;
-    VSETALL(tight_min,  MAX_FASTF);
-    VSETALL(tight_max, -MAX_FASTF);
-    {
-	struct soltab *stp;
-	RT_VISIT_ALL_SOLTABS_START(stp, rtip) {
-	    VMIN(tight_min, stp->st_min);
-	    VMAX(tight_max, stp->st_max);
-	} RT_VISIT_ALL_SOLTABS_END;
-    }
-
     double R;
     point_t center;
-    if (tight_min[X] < MAX_FASTF) {
-	/* Tight path: use actual object extents */
-	VADD2SCALE(center, tight_max, tight_min, 0.5);
-	vect_t tight_diag;
-	VSUB2(tight_diag, tight_max, tight_min);
-	R = 0.5 * MAGNITUDE(tight_diag);
-	/* Sanity: fall back if something degenerate slipped through */
-	if (R <= 0.0)
-	    R = rtip->rti_radius;
+    if (bbox_min && bbox_max) {
+	VADD2SCALE(center, bbox_max, bbox_min, 0.5);
+	vect_t bbox_diag;
+	VSUB2(bbox_diag, bbox_max, bbox_min);
+	R = 0.5 * MAGNITUDE(bbox_diag);
     } else {
-	/* No soltabs (unusual): fall back to the inflated rti values */
-	R = rtip->rti_radius;
-	VADD2SCALE(center, rtip->mdl_max, rtip->mdl_min, 0.5);
+	point_t tight_min, tight_max;
+	VSETALL(tight_min,  MAX_FASTF);
+	VSETALL(tight_max, -MAX_FASTF);
+	{
+	    struct soltab *stp;
+	    RT_VISIT_ALL_SOLTABS_START(stp, rtip) {
+		VMIN(tight_min, stp->st_min);
+		VMAX(tight_max, stp->st_max);
+	    } RT_VISIT_ALL_SOLTABS_END;
+	}
+
+	/* Tight path: use actual object extents */
+	if (tight_min[X] < MAX_FASTF) {
+	    VADD2SCALE(center, tight_max, tight_min, 0.5);
+	    vect_t tight_diag;
+	    VSUB2(tight_diag, tight_max, tight_min);
+	    R = 0.5 * MAGNITUDE(tight_diag);
+	    /* Sanity: fall back if something degenerate slipped through */
+	    if (R <= 0.0)
+		R = rtip->rti_radius;
+	} else {
+	    /* No soltabs (unusual): fall back to the inflated rti values */
+	    R = rtip->rti_radius;
+	    VADD2SCALE(center, rtip->mdl_max, rtip->mdl_min, 0.5);
+	}
     }
 
     if (R <= 0.0) {
@@ -402,7 +426,8 @@ rt_crofton_shoot(struct rt_i                      *rtip,
     /* ---- Shared accumulator ---- */
     struct crofton_shared shared;
     memset(&shared, 0, sizeof(shared));
-    shared.sem_stats = bu_semaphore_register("CROFTON_STATS");
+
+    std::mt19937_64 rng(RT_CROFTON_RNG_SEED);
 
     const double FOUR_PI    = 4.0 * M_PI;
     const double PI         = M_PI;
@@ -426,7 +451,7 @@ rt_crofton_shoot(struct rt_i                      *rtip,
 		    curr_rays = batch;
 	    }
 
-	    do_one_iteration(&ap, resources, curr_rays, R, center, &shared);
+	    do_one_iteration(&ap, resources, curr_rays, R, center, &shared, rng);
 	    iteration++;
 
 	    if (shared.total_rays == 0) break;
@@ -438,7 +463,9 @@ rt_crofton_shoot(struct rt_i                      *rtip,
 		* shared.total_chord
 		/ (double)shared.total_rays;
 
-	    if (iteration >= 3) {
+	    if (iteration >= 3 &&
+		shared.total_rays >= RT_CROFTON_STABILITY_MIN_RAYS &&
+		shared.total_crossings >= RT_CROFTON_STABILITY_MIN_CROSSINGS) {
 		const double thr = RT_CROFTON_DEFAULT_THRESHOLD;
 		double d_sa_cur  = (prev1_est_sa > 0.0)
 		    ? fabs(curr_est_sa  - prev1_est_sa) / prev1_est_sa * 100.0 : 999.0;
@@ -463,6 +490,7 @@ rt_crofton_shoot(struct rt_i                      *rtip,
 	/* ---- Parametric loop: n_rays / stability_mm / time_ms ---- */
 	double prev_r_sa = -1.0, prev_r_v = -1.0;
 	size_t total_fired = 0;
+	size_t stable_windows = 0;
 	int64_t t0 = (time_ms > 0.0) ? bu_gettime() : 0;
 
 	for (;;) {
@@ -480,7 +508,7 @@ rt_crofton_shoot(struct rt_i                      *rtip,
 		if (fire > remaining) fire = remaining;
 	    }
 
-	    do_one_iteration(&ap, resources, fire, R, center, &shared);
+	    do_one_iteration(&ap, resources, fire, R, center, &shared, rng);
 	    total_fired += fire;
 
 	    if (shared.total_rays == 0) break;
@@ -493,7 +521,9 @@ rt_crofton_shoot(struct rt_i                      *rtip,
 		/ (double)shared.total_rays;
 
 	    /* Stability check */
-	    if (stability_mm > 0.0) {
+	    if (stability_mm > 0.0 &&
+		shared.total_rays >= RT_CROFTON_STABILITY_MIN_RAYS &&
+		shared.total_crossings >= RT_CROFTON_STABILITY_MIN_CROSSINGS) {
 		double r_sa = (curr_est_sa > 0.0) ? sqrt(curr_est_sa * INV_4PI)  : 0.0;
 		double r_v  = (curr_est_v  > 0.0) ? cbrt(curr_est_v  * INV_4PI3) : 0.0;
 
@@ -502,7 +532,13 @@ rt_crofton_shoot(struct rt_i                      *rtip,
 			fabs(r_sa - prev_r_sa) < stability_mm;
 		    int v_ok  = (!out_volume) ||
 			fabs(r_v  - prev_r_v)  < stability_mm;
-		    if (sa_ok && v_ok) break;
+		    if (sa_ok && v_ok) {
+			stable_windows++;
+			if (stable_windows >= RT_CROFTON_STABILITY_MIN_WINDOWS)
+			    break;
+		    } else {
+			stable_windows = 0;
+		    }
 		}
 		prev_r_sa = r_sa;
 		prev_r_v  = r_v;
@@ -519,14 +555,14 @@ rt_crofton_shoot(struct rt_i                      *rtip,
     if (out_volume)    *out_volume    = curr_est_v;
 
     /* Clean each resource and NULL out its slot in rtip->rti_resources.
-     * This is necessary because crofton_from_ip calls rt_free_rti(rtip)
-     * after we return.  rt_free_rti → rt_clean iterates rti_resources and
+     * This is necessary because crofton_from_ip calls rt_i_destroy(rtip)
+     * after we return.  rt_i_destroy → rt_clean iterates rti_resources and
      * calls rt_clean_resource (which calls rt_init_resource) on every
      * non-NULL entry.  If we free the resources array first, those entries
      * become dangling pointers and rt_init_resource reads garbage re_cpu
      * values that may exceed MAX_PSW, triggering a BU_ASSERT.
      *
-     * By setting the slot to NULL we let rt_free_rti's cleanup skip it,
+     * By setting the slot to NULL we let rt_i_destroy's cleanup skip it,
      * and then we can safely bu_free the resources array.                */
     for (int i = 0; i < MAX_PSW; i++) {
 	if (resources[i].re_magic == RESOURCE_MAGIC) {
@@ -658,16 +694,16 @@ crofton_from_ip_n(const struct rt_db_internal    *ip,
     db_update_nref(dbip);
 
     /* ---- Build raytrace instance ---- */
-    struct rt_i *rtip = rt_new_rti(dbip);
+    struct rt_i *rtip = rt_i_create(dbip);
     if (!rtip) {
-	bu_log("rt_crofton: rt_new_rti() failed\n");
+	bu_log("rt_crofton: rt_i_create() failed\n");
 	db_close(dbip);
 	return -1;
     }
 
     if (rt_gettree(rtip, scratch) < 0) {
 	bu_log("rt_crofton: rt_gettree() failed for '%s'\n", scratch);
-	rt_free_rti(rtip);
+	rt_i_destroy(rtip);
 	db_close(dbip);
 	return -1;
     }
@@ -677,13 +713,13 @@ crofton_from_ip_n(const struct rt_db_internal    *ip,
     /* ---- Run Crofton estimator ---- */
     double sa  = 0.0;
     double vol = 0.0;
-    (void)rt_crofton_shoot(rtip, params, &sa, &vol);
+    (void)rt_crofton_shoot(&sa, &vol, rtip, params, NULL, NULL);
 
     if (out_sa)  *out_sa  = sa;
     if (out_vol) *out_vol = vol;
 
     /* ---- Clean up ---- */
-    rt_free_rti(rtip);
+    rt_i_destroy(rtip);
     /* wdb_dbopen for INMEM returns an embedded pointer inside dbip;
      * do NOT call wdb_close() here, as that would double-free dbip. */
     db_close(dbip);

@@ -76,7 +76,7 @@ brlcad_add_test(NAME bview_vlist_cmd_cnt_500 COMMAND bview_test vlist 500)
 #
 #  *** bv_view_get/set_* camera accessor tests ***
 #
-brlcad_addexec(test_bv_camera test_camera.c "libbv;libbu" TEST)
+brlcad_addexec(test_bv_camera test_camera.c "libbv;libbu;${M_LIBRARY}" TEST)
 brlcad_add_test(NAME bv_camera_accessors COMMAND test_bv_camera)
 
 #

@@ -61,9 +61,10 @@
 /* Describe algorithm here */
 
 /* from g_bot.c */
+__BEGIN_DECLS
 extern int rt_bot_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip);
 extern void rt_bot_ifree(struct rt_db_internal *ip);
-
+__END_DECLS
 
 /**
  * reads a set of ARS B records and returns a pointer to memory
@@ -113,7 +114,7 @@ ars_rd_curve(union record *rp, ssize_t npts, int flip)
  * Note that in each curve array, the first point is replicated as the
  * last point, to make processing the data easier.
  */
-int
+C_DECL int
 rt_ars_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     struct rt_ars_internal *ari;
@@ -196,7 +197,7 @@ rt_ars_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fa
  * The name will be added by the caller.  Generally, only libwdb will
  * set conv2mm != 1.0
  */
-int
+C_DECL int
 rt_ars_export4(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_ars_internal *arip;
@@ -265,7 +266,7 @@ rt_ars_export4(struct bu_external *ep, const struct rt_db_internal *ip, double l
     return 0;
 }
 
-int
+C_DECL int
 rt_ars_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !ip || !mat)
@@ -305,7 +306,7 @@ rt_ars_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_inter
  * Note that in each curve array, the first point is replicated as the
  * last point, to make processing the data easier.
  */
-int
+C_DECL int
 rt_ars_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     struct rt_ars_internal *ari;
@@ -362,7 +363,7 @@ rt_ars_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fa
  * The name will be added by the caller.  Generally, only libwdb will
  * set conv2mm != 1.0
  */
-int
+C_DECL int
 rt_ars_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_ars_internal *arip;
@@ -410,7 +411,7 @@ rt_ars_export5(struct bu_external *ep, const struct rt_db_internal *ip, double l
  * line describes type of solid.  Additional lines are indented one
  * tab, and give parameter values.
  */
-int
+C_DECL int
 rt_ars_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local)
 {
     register size_t  i, j;
@@ -458,7 +459,7 @@ rt_ars_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose
  * Free the storage associated with the rt_db_internal version of this
  * solid.
  */
-void
+C_DECL void
 rt_ars_ifree(struct rt_db_internal *ip)
 {
     register struct rt_ars_internal *arip;
@@ -482,7 +483,7 @@ rt_ars_ifree(struct rt_db_internal *ip)
 }
 
 
-int
+C_DECL int
 rt_ars_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, const struct bg_tess_tol *UNUSED(ttol), const struct bn_tol *tol)
 {
     register size_t i;
@@ -494,6 +495,7 @@ rt_ars_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, co
     struct faceuse *fu;
     struct bu_ptbl kill_fus;
     int bad_ars = 0;
+    int open_seam_ars = 0;
     struct bu_list *vlfree = &rt_vlfree;
 
     RT_CK_DB_INTERNAL(ip);
@@ -540,25 +542,26 @@ rt_ars_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, co
 						 ELEMENTS_PER_VECT];
 	    if (!VNEAR_EQUAL(first_pt, last_pt, tol->dist)) {
 		bu_log("ARS: curve #%zu is not closed in 3D "
-		       "(first=(%g %g %g) last=(%g %g %g) dist=%g > tol=%g).\n"
-		       "\tThis ARS solid cannot be tessellated into a closed "
-		       "manifold mesh.\n"
-		       "\tThe source data has a seam discontinuity that makes "
-		       "it unsuitable for tessellation.\n",
+		       "(first=(%g %g %g) last=(%g %g %g) dist=%g > tol=%g).\n",
 		       i,
 		       V3ARGS(first_pt), V3ARGS(last_pt),
 		       DIST_PNT_PNT(first_pt, last_pt), tol->dist);
-		bad_ars = 1;
+		open_seam_ars = 1;
 	    }
 	}
     }
 
     if (bad_ars) {
 	bu_log("ARS tessellation skipped: solid has non-manifold geometry "
-	       "(backtracking curve or non-closed ring seam).\n"
+	       "(backtracking curve).\n"
 	       "\tThis ARS solid cannot produce a valid closed mesh and will "
 	       "not be tessellated.\n");
 	return -1;
+    }
+    if (open_seam_ars) {
+	bu_log("WARNING: This ARS solid has non-closed 3D ring seams.\n"
+		"\tTessellation will be attempted, but the result may not be a "
+		"closed manifold mesh (and incorrect).\n");
     }
 
     bu_ptbl_init(&kill_fus, 64, " &kill_fus");
@@ -623,15 +626,15 @@ rt_ars_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, co
 		if ((fu = nmg_cmface(s, corners, 3)) == (struct faceuse *)0) {
 		    bu_log("rt_ars_tess() nmg_cmface failed, skipping face a[%zu][%zu]\n",
 			   i, j);
-		}
-
-		/* Associate vertex geometry, if new */
-		ASSOC_GEOM(0, 0, 0);
-		ASSOC_GEOM(1, 0, 1);
-		ASSOC_GEOM(2, 1, 1);
-		if (nmg_calc_face_g(fu, vlfree)) {
-		    bu_log("Degenerate face created, will kill it later\n");
-		    bu_ptbl_ins(&kill_fus, (long *)fu);
+		} else {
+		    /* Associate vertex geometry, if new */
+		    ASSOC_GEOM(0, 0, 0);
+		    ASSOC_GEOM(1, 0, 1);
+		    ASSOC_GEOM(2, 1, 1);
+		    if (nmg_calc_face_g(fu, vlfree)) {
+			bu_log("Degenerate face created, will kill it later\n");
+			bu_ptbl_ins(&kill_fus, (long *)fu);
+		    }
 		}
 	    }
 
@@ -654,15 +657,15 @@ rt_ars_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, co
 		if ((fu = nmg_cmface(s, corners, 3)) == (struct faceuse *)0) {
 		    bu_log("rt_ars_tess() nmg_cmface failed, skipping face b[%zu][%zu]\n",
 			   i, j);
-		}
-
-		/* Associate vertex geometry, if new */
-		ASSOC_GEOM(0, 1, 0);
-		ASSOC_GEOM(1, 0, 0);
-		ASSOC_GEOM(2, 1, 1);
-		if (nmg_calc_face_g(fu, vlfree)) {
-		    bu_log("Degenerate face created, will kill it later\n");
-		    bu_ptbl_ins(&kill_fus, (long *)fu);
+		} else {
+		    /* Associate vertex geometry, if new */
+		    ASSOC_GEOM(0, 1, 0);
+		    ASSOC_GEOM(1, 0, 0);
+		    ASSOC_GEOM(2, 1, 1);
+		    if (nmg_calc_face_g(fu, vlfree)) {
+			bu_log("Degenerate face created, will kill it later\n");
+			bu_ptbl_ins(&kill_fus, (long *)fu);
+		    }
 		}
 	    }
 	}
@@ -676,6 +679,9 @@ rt_ars_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, co
 	NMG_CK_FACEUSE(fu);
 	(void)nmg_kfu(fu);
     }
+
+    /* cleanup memory */
+    bu_ptbl_free(&kill_fus);
 
     /* ARS solids are often built with incorrect face normals.  Don't
      * depend on them to be correct.
@@ -704,7 +710,7 @@ rt_ars_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, co
 /**
  * TODO:  produces bboxes that are waaay too big.
  */
-int
+C_DECL int
 rt_ars_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct bn_tol *UNUSED(tol))
 {
     register size_t i;
@@ -746,7 +752,7 @@ rt_ars_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct 
  * This routine is unusual in that it has to read additional database
  * records to obtain all the necessary information.
  */
-int
+C_DECL int
 rt_ars_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 {
     struct rt_db_internal intern;
@@ -797,7 +803,7 @@ rt_ars_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 }
 
 
-int
+C_DECL int
 rt_ars_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_tess_tol *UNUSED(ttol), const struct bn_tol *UNUSED(tol), const struct bview *UNUSED(info))
 {
     register size_t i;
@@ -835,7 +841,7 @@ rt_ars_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_te
 }
 
 
-int
+C_DECL int
 rt_ars_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *attr)
 {
     register struct rt_ars_internal *ars = (struct rt_ars_internal *)intern->idb_ptr;
@@ -906,7 +912,7 @@ rt_ars_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const cha
 }
 
 
-int
+C_DECL int
 rt_ars_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv)
 {
     struct rt_ars_internal *ars;
@@ -1039,7 +1045,68 @@ rt_ars_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, co
 }
 
 
-int
+C_DECL int
+rt_ars_make(const struct rt_functab *ftp, struct rt_db_internal *intern, const char* UNUSED(variant), const point_t origin, double scale)
+{
+    struct rt_ars_internal *ars_ip;
+    size_t curve;
+
+    intern->idb_major_type = DB5_MAJORTYPE_BRLCAD;
+    intern->idb_type = ID_ARS;
+    BU_ASSERT(&OBJ[intern->idb_type] == ftp);
+    intern->idb_meth = ftp;
+
+    BU_ALLOC(ars_ip, struct rt_ars_internal);
+    intern->idb_ptr = (void *)ars_ip;
+    ars_ip->magic = RT_ARS_INTERNAL_MAGIC;
+    ars_ip->ncurves = 3;
+    ars_ip->pts_per_curve = 3;
+    ars_ip->curves = (fastf_t **)bu_malloc((ars_ip->ncurves+1) * sizeof(fastf_t *), "ars curve ptrs");
+
+    for (curve=0; curve < ars_ip->ncurves; curve++) {
+	ars_ip->curves[curve] = (fastf_t *)bu_calloc(
+	    (ars_ip->pts_per_curve + 1) * 3,
+	    sizeof(fastf_t), "ARS points");
+
+	if (curve == 0) {
+	    VSET(&(ars_ip->curves[0][0]),
+		 origin[X],
+		 origin[Y],
+		 origin[Z]);
+	    VMOVE(&(ars_ip->curves[curve][3]), &(ars_ip->curves[curve][0]));
+	    VMOVE(&(ars_ip->curves[curve][6]), &(ars_ip->curves[curve][0]));
+	} else if (curve == (ars_ip->ncurves - 1)) {
+	    VSET(&(ars_ip->curves[curve][0]),
+		 origin[X],
+		 origin[Y],
+		 origin[Z]+curve*0.5*scale);
+	    VMOVE(&(ars_ip->curves[curve][3]), &(ars_ip->curves[curve][0]));
+	    VMOVE(&(ars_ip->curves[curve][6]), &(ars_ip->curves[curve][0]));
+
+	} else {
+	    fastf_t x, y, z;
+	    x = origin[X]+curve*0.5*scale;
+	    y = origin[Y]+curve*0.5*scale;
+	    z = origin[Z]+curve*0.5*scale;
+
+	    VSET(&ars_ip->curves[curve][0],
+		 origin[X],
+		 origin[Y],
+		 z);
+	    VSET(&ars_ip->curves[curve][3],
+		 x,
+		 origin[Y],
+		 z);
+	    VSET(&ars_ip->curves[curve][6],
+		 x, y, z);
+	}
+    }
+
+    return BRLCAD_OK;
+}
+
+
+C_DECL int
 rt_ars_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
 {
     RT_CK_DB_INTERNAL(ip);
@@ -1047,7 +1114,7 @@ rt_ars_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
     return 0;			/* OK */
 }
 
-int
+C_DECL int
 rt_ars_labels(struct rt_point_labels *pl, int pl_max, const mat_t xform, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     int lcnt = 1;

@@ -24,6 +24,8 @@
 
 #include "common.h"
 
+#include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 
 #include "bio.h"
@@ -54,10 +56,28 @@ static char usage[] = "\
 Usage: fbgrid [-c] [-b | -d | -o] [-F framebuffer]\n\
 	[-S squaresize] [-W width] [-N height]\n";
 
+static int
+parse_positive_int_arg(const char *label, const char *value, int *result)
+{
+    long parsed;
+    char *endptr = NULL;
+
+    errno = 0;
+    parsed = strtol(value, &endptr, 10);
+    if (errno != 0 || endptr == value || *endptr != '\0' || parsed <= 0 || parsed > INT_MAX) {
+	fprintf(stderr, "fbgrid: invalid %s '%s'\n", label, value);
+	return 0;
+    }
+
+    *result = (int)parsed;
+    return 1;
+}
+
 int
 get_args(int argc, char **argv)
 {
     int c;
+    int remaining = 0;
 
     while ((c = bu_getopt(argc, argv, "cbdoF:s:w:n:S:W:N:h?")) != -1) {
 	switch (c) {
@@ -79,15 +99,19 @@ get_args(int argc, char **argv)
 	    case 'S':
 	    case 's':
 		/* square size */
-		fbheight = fbwidth = atoi(bu_optarg);
+		if (!parse_positive_int_arg("size", bu_optarg, &fbwidth))
+		    return 0;
+		fbheight = fbwidth;
 		break;
 	    case 'W':
 	    case 'w':
-		fbwidth = atoi(bu_optarg);
+		if (!parse_positive_int_arg("width", bu_optarg, &fbwidth))
+		    return 0;
 		break;
 	    case 'N':
 	    case 'n':
-		fbheight = atoi(bu_optarg);
+		if (!parse_positive_int_arg("height", bu_optarg, &fbheight))
+		    return 0;
 		break;
 
 	    default:		/* '?' */
@@ -98,8 +122,11 @@ get_args(int argc, char **argv)
     if (argc == 1 && isatty(fileno(stdin)) && isatty(fileno(stdout)))
 	return 0;
 
-    if (argc > ++bu_optind)
-	fprintf(stderr, "fbgrid: excess argument(s) ignored\n");
+    remaining = argc - bu_optind;
+    if (remaining != 0) {
+	fprintf(stderr, "fbgrid: excess argument(s) not supported\n");
+	return 0;
+    }
 
     return 1;		/* OK */
 }
@@ -184,17 +211,17 @@ oldflavor(void)
     int fb_sz;
     static RGBpixel black, white, red;
 
-    fbiop = fb_open(NULL, fbwidth, fbheight);
+    fbiop = fb_open(framebuffer, fbwidth, fbheight);
     if (fbiop == NULL) {
 	bu_exit(1, NULL);
     }
 
-    fb_sz = fb_getwidth(fbp);
+    fb_sz = fb_getwidth(fbiop);
     white[RED] = white[GRN] = white[BLU] = 255;
     black[RED] = black[GRN] = black[BLU] = 0;
     red[RED] = 255;
     middle = fb_sz/2;
-    fb_ioinit(fbp);
+    fb_ioinit(fbiop);
     if (fb_sz <= 512)
 	mask = 0x7;
     else
@@ -203,19 +230,19 @@ oldflavor(void)
     for (y = fb_sz-1; y >= 0; y--) {
 	for (x = 0; x < fb_sz; x++) {
 	    if (x == y || x == fb_sz - y) {
-		fb_wpixel(fbp, white);
+		fb_wpixel(fbiop, white);
 	    } else
 		if (x == middle || y == middle) {
-		    fb_wpixel(fbp, red);
+		    fb_wpixel(fbiop, red);
 		} else
 		    if ((x & mask) && (y & mask)) {
-			fb_wpixel(fbp, black);
+			fb_wpixel(fbiop, black);
 		    } else {
-			fb_wpixel(fbp, white);
+			fb_wpixel(fbiop, white);
 		    }
 	}
     }
-    fb_close(fbp);
+    fb_close(fbiop);
     bu_exit(0, NULL);
 }
 

@@ -41,7 +41,7 @@
 #define ECMD_VOL_THRESH_HI	13051	/* set VOL threshold (hi) */
 #define ECMD_VOL_FNAME		13052	/* set VOL file name */
 
-void
+C_DECL void
 rt_edit_vol_set_edit_mode(struct rt_edit *s, int mode)
 {
     rt_edit_set_edflag(s, mode);
@@ -108,7 +108,7 @@ struct rt_edit_menu_item vol_menu[] = {
     { "", NULL, 0 }
 };
 
-struct rt_edit_menu_item *
+C_DECL struct rt_edit_menu_item *
 rt_edit_vol_menu_item(const struct bn_tol *UNUSED(tol))
 {
     return vol_menu;
@@ -242,7 +242,8 @@ static const struct rt_edit_cmd_desc vol_cmds[] = {
 	1,                    /* nparam       */
 	vol_fname_params,     /* params       */
 	0,                    /* interactive  */
-	10                    /* display_order */
+	10                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_VOL_FSIZE,       /* cmd_id       */
@@ -251,7 +252,8 @@ static const struct rt_edit_cmd_desc vol_cmds[] = {
 	3,                    /* nparam       */
 	vol_fsize_params,     /* params       */
 	0,                    /* interactive  */
-	20                    /* display_order */
+	20                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_VOL_CSIZE,       /* cmd_id       */
@@ -260,7 +262,8 @@ static const struct rt_edit_cmd_desc vol_cmds[] = {
 	3,                    /* nparam       */
 	vol_csize_params,     /* params       */
 	1,                    /* interactive  */
-	30                    /* display_order */
+	30                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_VOL_THRESH_LO,   /* cmd_id       */
@@ -269,7 +272,8 @@ static const struct rt_edit_cmd_desc vol_cmds[] = {
 	1,                    /* nparam       */
 	vol_thresh_lo_params, /* params       */
 	1,                    /* interactive  */
-	40                    /* display_order */
+	40                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_VOL_THRESH_HI,   /* cmd_id       */
@@ -278,7 +282,8 @@ static const struct rt_edit_cmd_desc vol_cmds[] = {
 	1,                    /* nparam       */
 	vol_thresh_hi_params, /* params       */
 	1,                    /* interactive  */
-	50                    /* display_order */
+	50                    /* display_order */,
+	NULL                  /* req_types */
     }
 };
 
@@ -286,10 +291,12 @@ static const struct rt_edit_prim_desc vol_prim_desc = {
     "vol",                /* prim_type    */
     "Volumetric Data",    /* prim_label   */
     5,                    /* ncmd         */
-    vol_cmds              /* cmds         */
+    vol_cmds              /* cmds         */,
+    0,                    /* nopt         */
+    NULL                  /* opts         */
 };
 
-const struct rt_edit_prim_desc *
+C_DECL const struct rt_edit_prim_desc *
 rt_edit_vol_edit_desc(void)
 {
     return &vol_prim_desc;
@@ -534,7 +541,7 @@ rt_edit_vol_pscale(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_vol_edit(struct rt_edit *s)
 {
     switch (s->edit_flag) {
@@ -553,7 +560,7 @@ rt_edit_vol_edit(struct rt_edit *s)
     }
 }
 
-int
+C_DECL int
 rt_edit_vol_edit_xy(
 	struct rt_edit *s,
 	const vect_t mousevec

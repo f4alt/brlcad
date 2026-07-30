@@ -292,6 +292,33 @@ formatDouble(double d)
     return str;
 }
 
+static std::string
+formatFileSize(long long bytes)
+{
+    if (bytes < 0) {
+	return "N/A";
+    }
+
+    static const char *units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
+    double value = static_cast<double>(bytes);
+    size_t unit = 0;
+
+    while (value >= 1024.0 && unit < (sizeof(units) / sizeof(units[0])) - 1) {
+	value /= 1024.0;
+	unit++;
+    }
+
+    std::stringstream ss;
+    if (unit == 0) {
+	ss << bytes;
+    } else {
+	ss << std::fixed << std::setprecision(value >= 100.0 ? 0 : 1) << value;
+    }
+    ss << " " << units[unit];
+
+    return ss.str();
+}
+
 boundingBox
 InformationGatherer::getBBData(std::string component)
 {
@@ -425,32 +452,25 @@ InformationGatherer::getEntityData(char* buf)
 void
 InformationGatherer::getSubComp()
 {
-    std::string mged = getCmdPath(opt->getExeDir(), "mged");
-    std::string inFile = opt->getInFile();
-    std::string tclScript = "foreach {s} \\[ lt " + largestComponents[0].name + " \\] { set o \\[lindex \\$s 1\\] ; puts \\\"\\$o \\[llength \\[search \\$o \\] \\] \\\" }";
-    const char* av[5] = {mged.c_str(), "-c", inFile.c_str(), tclScript.c_str(), NULL};
-
-    struct bu_process* p;
-    bu_process_create(&p, av, BU_PROCESS_HIDE_WINDOW);
-
-    int read_cnt = 0;
-    char buf[1024] = {0};
-    std::string result = "";
-    while ((read_cnt = bu_process_read_n(p, BU_PROCESS_STDOUT, 1024-1, buf)) > 0) {
-        buf[read_cnt] = '\0';
-        result += buf;
+    std::string rootPath = largestComponents[0].name;
+    if (!rootPath.empty() && rootPath[0] != '/') {
+	rootPath = "/" + rootPath;
     }
 
-    (void)bu_process_wait_n(&p, 0);
+    const char *cmd[6] = {"search", rootPath.c_str(), "-mindepth", "1", "-maxdepth", "1"};
+    ged_exec_search(g, 6, cmd);
 
-    std::stringstream ss(result);
+    std::stringstream ss(bu_vls_addr(g->ged_result_str));
     std::string comp;
-    int numEntities = 0;
     std::vector<ComponentData> subComps;
 
-    while (ss >> comp >> numEntities) {
-        boundingBox bb = getBBData(comp);
-        subComps.push_back({numEntities, bb, comp});
+    while (std::getline(ss, comp)) {
+	if (comp.empty()) {
+	    continue;
+	}
+	int numEntities = getNumEntities(comp);
+	boundingBox bb = getBBData(comp);
+	subComps.push_back({numEntities, bb, comp});
     }
     sort(subComps.rbegin(), subComps.rend());
     largestComponents.reserve(largestComponents.size() + subComps.size());
@@ -722,18 +742,21 @@ InformationGatherer::gatherInformation(std::string UNUSED(name))
     }
 
     //Gather last date updated
-    struct stat info;
-    stat(opt->getInFile().c_str(), &info);
-    std::time_t update = info.st_mtime;
-    tm* ltm = localtime(&update);
-    std::string date = std::to_string(ltm->tm_mon + 1) + "/" + std::to_string(ltm->tm_mday) + "/" + std::to_string(ltm->tm_year + 1900);
-    infoMap.insert(std::pair < std::string, std::string>("lastUpdate", date));
+    struct stat info = {};
+    std::string date;
+    tm* ltm = NULL;
+    if (stat(opt->getInFile().c_str(), &info) == 0) {
+	std::time_t update = info.st_mtime;
+	ltm = localtime(&update);
+	date = std::to_string(ltm->tm_mon + 1) + "/" + std::to_string(ltm->tm_mday) + "/" + std::to_string(ltm->tm_year + 1900);
+	infoMap.insert(std::pair < std::string, std::string>("lastUpdate", date));
+	infoMap["fileSize"] = formatFileSize(static_cast<long long>(info.st_size));
+    } else {
+	infoMap["lastUpdate"] = "N/A";
+	infoMap["fileSize"] = "N/A";
+    }
 
     //Gather source file
-    std::size_t last1 = opt->getInFile().find_last_of("/");
-    std::size_t last2 = opt->getInFile().find_last_of("\\");
-    last = last1 < last2 ? last1 : last2;
-
     std::string file = opt->getInFile();
 
     infoMap.insert(std::pair < std::string, std::string>("file", file));

@@ -4,107 +4,133 @@
 :manmanual: BRL-CAD
 
 == NAME
-g-iges - IGES Translator (BRL-CAD to IGES)
+
+g-iges - convert a BRL-CAD database to an IGES file
 
 == SYNOPSIS
 
 [source]
 ----
-g-iges [-f | t | m] [-v] [-s] [-x flag1] [-X flag2] [-a abs_tol] [-r rel_tol] [-n norm_tol] [-o output_file_or_directory] database.g object(s)
+g-iges [-f|-t|-m] [-s] [-v] [-a _abs_tol_] [-r _rel_tol_] [-n _norm_tol_] [-d _dist_tol_] [-P _ncpu_] [-x _rt_debug_] [-X _nmg_debug_] [-o _output_file_] _database.g_ _object_ [_object_ ...]
 ----
-
 
 [[description]]
 == DESCRIPTION
 
-*g-iges* converts the specified objects of the BRL-CAD database, _database.g_, to an IGES version 5.1 file, _file.iges_.
+*g-iges* converts the specified _object_(s) from a BRL-CAD _database.g_ database
+into an IGES version 5.1 file.
 
-The following options are recognized
+By default a CSG IGES file is produced: every region is written as a Boolean
+tree, with each solid represented by its IGES CSG equivalent. Any solid that has
+no IGES CSG equivalent is tessellated (using the tessellation tolerances) and
+written as a boundary-representation (B-Rep) object. The *-f*, *-t*, and *-m*
+options select alternative output modes; they are mutually exclusive, and the
+last one given wins.
 
+If no output file is given with *-o*, the IGES file is written to standard
+output. The inverse translation, from IGES to BRL-CAD, is performed by
+*iges-g*(1).
+
+[[options]]
+== OPTIONS
 
 *-f*::
-selects a BREP IGES file consisting of only Manifold Solid BREP Objects. All CSG solids in the specified objects are tessellated to produce facetted BREP objects, then the indicated Boolean operations are performed for each region. Individual regions are written to the IGES file as individual BREP objects. This procedure results in some approximations since curved surface solids, such as TGCs or ellipsoids, are approximated by flat facets. The accuracy of the tessellation may be controlled through the use of the *-a, -r, -n* options.
-
-
-*-a* __abs_tol__::
-Sets the absolute tolerance (floating point value) for tessellation.
-
-
-*-r* __rel_tol__::
-Sets the relative (to the size of the object) tolerance (floating point value) for tessellation.
-
-
-*-n* __norm_tol__::
-Sets the normal tolerance (floating point value 0..1) for tessellation. This value is compared to the dot product of the normals to determine if the surfaces are within tolerance
-
+  Facetized B-Rep output. Every region is tessellated, its Boolean operations
+  are evaluated, and the result is written as a single manifold-solid B-Rep
+  object. Tessellation accuracy is governed by *-a*, *-r*, and *-n*.
 
 *-t*::
-indicates that an IGES file consisting of only trimmed NURBs should be created. The trimmed NURBs will all be planar NURBs, and they are the facets derived from the tessellation and Boolean evaluation as in the -f option. The file produced in this way is acceptable to the Pro/Engineer IGES import routine.
-
+  Trimmed-surface output (experimental). Each region is written as a collection
+  of trimmed NURBS derived from the facets of the tessellated, Boolean-evaluated
+  region.
 
 *-m*::
-implies the -t option, and is used to produce multiple IGES files (one for each region converted). In this case the argument to the -o option should be a directory where the IGES files will accumulate.
-
-
-*-v*::
-requests debugging information
-
+  Multi-file output: write a separate IGES file for each converted region.
+  Implies *-t*, and the *-o* argument must name an existing directory in which
+  the per-region files are created.
 
 *-s*::
-all facets in BREP objects should be output in the form of planar NURBs (Intergraph likes their IGES files this way).
+  Write the faces of B-Rep objects as planar NURBS surfaces.
 
+*-a* _abs_tol_::
+  Absolute tessellation tolerance, in millimeters. Default 0.0 (disabled).
 
-*-x* _flag1_::
-set the librt debug flag (see raytrace.h for values)
+*-r* _rel_tol_::
+  Relative tessellation tolerance, as a fraction of object size. Default 0.01.
 
+*-n* _norm_tol_::
+  Surface-normal tessellation tolerance. Default 0.0 (disabled).
 
-*-X* _flag2_::
-set the librt debug flag (see nmg.h for values)
+*-d* _dist_tol_::
+  Minimum distance between distinct points, in millimeters. Default 0.0005.
 
+*-P* _ncpu_::
+  Number of processors to use during tessellation. Default 1.
 
-*-o* __output_file_or_directory__::
-Specifies the output file (or in the case of the -m) the output directory for the iges file(s).
+*-v*::
+  Verbose output; repeat for more detail.
 
+*-x* _rt_debug_::
+  Set the *librt* raytrace debug flag (hexadecimal). See raytrace.h for values.
 
-*-P* __num_cpus__::
-Specifies the number of processors to use.
+*-X* _nmg_debug_::
+  Set the NMG debug flag (hexadecimal). See nmg.h for values.
 
+*-o* _output_file_::
+  Write the IGES output to _output_file_ instead of standard output. With *-m*,
+  this argument must be a directory.
 
+[[examples]]
+== EXAMPLES
 
-If neither the -f , -t , nor the -m options are selected, the default is a CSG IGES file. In this situation, all regions will be written to the IGES file as Boolean trees with all possible solids represented by their IGES CSG equivalent. In cases where there is no IGES CSG equivalent, the BRL-CAD solid is tesellated (using the provided tolerances), and a BREP object is written for that solid.
+.Convert selected regions to a CSG IGES file
+====
+[source,bash]
+----
+g-iges -o assembly.iges assembly.g hull turret
+----
+Writes the hull and turret regions of assembly.g as a CSG IGES file, preserving
+the Boolean tree where IGES primitive equivalents exist and tessellating the
+rest.
+====
 
+.Produce a faceted B-Rep IGES file with tight tolerances
+====
+[source,bash]
+----
+g-iges -f -a 0.1 -n 0.01 -o widget.iges widget.g widget
+----
+Tessellates the widget region to within an absolute tolerance of 0.1 mm and a
+surface-normal tolerance of 0.01 radians, then writes it as a manifold-solid
+B-Rep, suitable for downstream CAD packages that prefer evaluated geometry over
+CSG.
+====
 
-[[example]]
-== EXAMPLE
-
-g-iges -f -o _gsample.iges sample.g object1_
-
-This command will produce an IGES BREP output file, _sample.iges_, from _object1_ of the BRL-CAD database file _sample.g_.
-
+.Split a model into one IGES file per region
+====
+[source,bash]
+----
+mkdir parts
+g-iges -m -o parts model.g topgroup
+----
+Writes each region under topgroup as its own trimmed-NURBS IGES file inside the
+parts directory, which is convenient for importing assemblies part-by-part.
+====
 
 [[see_also]]
 == SEE ALSO
 
-*iges-g*(1) _The Initial Graphics Exchange Specification (IGES) Version 5.1_, IGES/PDES Organization, September 1991
-
-
-[[diagnostics]]
-== DIAGNOSTICS
-
-Error messages are intended to be self-explanatory.
-
+*brlcad*(1), *iges-g*(1), *g-step*(1), *mged*(1)
 
 [[author]]
 == AUTHOR
 
 BRL-CAD Team
 
-
 [[copyright]]
 == COPYRIGHT
 
-This software is Copyright (c) 1993-2026 by the United States Government as represented by U.S. Army Research Laboratory.
-
+This software is Copyright (c) 1989-2026 by the United States Government as represented by U.S. Army Research Laboratory.
 
 [[bug_reports]]
 == BUG REPORTS

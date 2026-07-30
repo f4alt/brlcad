@@ -2,12 +2,12 @@ set(PLUGIN_LIBS libged libbu)
 
 ged_plugin_library(ged-solid_report
   solid_report.c
+  ../who/who_solids.cpp # FIXME: remove post-deprecation
   LIBS ${PLUGIN_LIBS}
 )
 
 cmakefiles(
   CMakeLists.txt
-  solid_report.c
 )
 
 # Local Variables:

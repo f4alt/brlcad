@@ -105,7 +105,7 @@ hyp_internal_to_specific(struct rt_hyp_internal *hyp_in) {
 }
 
 
-const struct bu_structparse rt_hyp_parse[] = {
+EXTERNCPP const struct bu_structparse rt_hyp_parse[] = {
     { "%f", 3, "V",   bu_offsetofarray(struct rt_hyp_internal, hyp_Vi, fastf_t, X), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
     { "%f", 3, "H",   bu_offsetofarray(struct rt_hyp_internal, hyp_Hi, fastf_t, X), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
     { "%f", 3, "A",   bu_offsetofarray(struct rt_hyp_internal, hyp_A, fastf_t, X), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
@@ -160,7 +160,7 @@ clt_hyp_pack(struct bu_pool *pool, struct soltab *stp)
 /**
  * Create a bounding RPP for an hyp
  */
-int
+C_DECL int
 rt_hyp_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct bn_tol *UNUSED(tol)) {
     struct rt_hyp_internal *xip;
     vect_t hyp_Au, hyp_B, hyp_An, hyp_Bn, hyp_H;
@@ -222,7 +222,7 @@ rt_hyp_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct 
  * A struct hyp_specific is created, and its address is stored in
  * stp->st_specific for use by hyp_shot().
  */
-int
+C_DECL int
 rt_hyp_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 {
     struct rt_hyp_internal *hyp_ip;
@@ -254,7 +254,7 @@ rt_hyp_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 }
 
 
-void
+C_DECL void
 rt_hyp_print(const struct soltab *stp)
 {
     const struct hyp_specific *hyp =
@@ -282,7 +282,7 @@ rt_hyp_print(const struct soltab *stp)
  * 0 MISS
  * >0 HIT
  */
-int
+C_DECL int
 rt_hyp_shot(struct soltab *stp, struct xray *rp, struct application *ap, struct seg *seghead)
 {
     struct hyp_specific *hyp =	(struct hyp_specific *)stp->st_specific;
@@ -449,9 +449,160 @@ rt_hyp_shot(struct soltab *stp, struct xray *rp, struct application *ap, struct 
 
 
 /**
+ * Vectorized counterpart to rt_hyp_shot().
+ *
+ * Batch-intersect n rays, one seg per ray written into the flat segp[]
+ * array (no seg-list allocation).  A hyp can produce two disjoint
+ * segments (4 hits); following the rt_tor_vshot() convention the single
+ * returned seg spans the OUTER extent (nearest entry to farthest exit).
+ * Per-ray arithmetic mirrors rt_hyp_shot() exactly; hit_vpriv/hit_surfno
+ * are preserved for rt_hyp_norm().
+ */
+C_DECL void
+rt_hyp_vshot(struct soltab **stp, struct xray **rp, struct seg *segp, int n, struct application *ap)
+/* An array of solid pointers */
+/* An array of ray pointers */
+/* array of segs (results returned) */
+/* Number of ray/object pairs */
+{
+    int idx;
+
+    if (ap) RT_CK_APPLICATION(ap);
+
+    for (idx = 0; idx < n; idx++) {
+	struct hyp_specific *hyp;
+	struct hit hits[5];	/* 4 potential hits */
+	struct hit *hitp;
+	vect_t dp, pp, xlated;
+	fastf_t k1, k2, a, b, c, disc, hitX, hitY, height;
+
+	if (stp[idx] == 0) continue;			/* skip this ray */
+	segp[idx].seg_stp = (struct soltab *)0;		/* assume MISS */
+
+	hyp = (struct hyp_specific *)stp[idx]->st_specific;
+	hitp = &hits[0];
+
+	dp[X] = VDOT(hyp->hyp_Aunit, rp[idx]->r_dir);
+	dp[Y] = VDOT(hyp->hyp_Bunit, rp[idx]->r_dir);
+	dp[Z] = VDOT(hyp->hyp_Hunit, rp[idx]->r_dir);
+
+	VSUB2(xlated, rp[idx]->r_pt, hyp->hyp_V);
+	pp[X] = VDOT(hyp->hyp_Aunit, xlated);
+	pp[Y] = VDOT(hyp->hyp_Bunit, xlated);
+	pp[Z] = VDOT(hyp->hyp_Hunit, xlated);
+
+	/* find roots to quadratic (hitpoints) */
+	a = hyp->hyp_rx*dp[X]*dp[X] + hyp->hyp_ry*dp[Y]*dp[Y] - hyp->hyp_rz*dp[Z]*dp[Z];
+	b = 2.0 * (hyp->hyp_rx*pp[X]*dp[X] + hyp->hyp_ry*pp[Y]*dp[Y] - hyp->hyp_rz*pp[Z]*dp[Z]);
+	c = hyp->hyp_rx*pp[X]*pp[X] + hyp->hyp_ry*pp[Y]*pp[Y] - hyp->hyp_rz*pp[Z]*pp[Z] - 1.0;
+
+	disc = b*b - (4.0 * a * c);
+	if (!NEAR_ZERO(a, RT_PCOEF_TOL)) {
+	    if (disc > 0) {
+		disc = sqrt(disc);
+
+		k1 = (-b + disc) / (2.0 * a);
+		k2 = (-b - disc) / (2.0 * a);
+
+		VJOIN1(hitp->hit_vpriv, pp, k1, dp);
+		height = hitp->hit_vpriv[Z];
+		if (fabs(height) <= hyp->hyp_Hmag) {
+		    hitp->hit_magic = RT_HIT_MAGIC;
+		    hitp->hit_dist = k1;
+		    hitp->hit_surfno = HYP_NORM_BODY;
+		    hitp++;
+		}
+
+		VJOIN1(hitp->hit_vpriv, pp, k2, dp);
+		height = hitp->hit_vpriv[Z];
+		if (fabs(height) <= hyp->hyp_Hmag) {
+		    hitp->hit_magic = RT_HIT_MAGIC;
+		    hitp->hit_dist = k2;
+		    hitp->hit_surfno = HYP_NORM_BODY;
+		    hitp++;
+		}
+	    }
+	} else if (!NEAR_ZERO(b, RT_PCOEF_TOL)) {
+	    k1 = -c / b;
+	    VJOIN1(hitp->hit_vpriv, pp, k1, dp);
+	    if (hitp->hit_vpriv[Z] >= -hyp->hyp_Hmag
+		&& hitp->hit_vpriv[Z] <= hyp->hyp_Hmag) {
+		hitp->hit_magic = RT_HIT_MAGIC;
+		hitp->hit_dist = k1;
+		hitp->hit_surfno = HYP_NORM_BODY;
+		hitp++;
+	    }
+	}
+
+	/* check top & bottom plates */
+	k1 = (hyp->hyp_Hmag - pp[Z]) / dp[Z];
+	k2 = (-hyp->hyp_Hmag - pp[Z]) / dp[Z];
+
+	VJOIN1(hitp->hit_vpriv, pp, k1, dp);
+	hitX = hitp->hit_vpriv[X];
+	hitY = hitp->hit_vpriv[Y];
+	if ((hyp->hyp_rx*hitX*hitX + hyp->hyp_ry*hitY*hitY) < hyp->hyp_bounds) {
+	    hitp->hit_magic = RT_HIT_MAGIC;
+	    hitp->hit_dist = k1;
+	    hitp->hit_surfno = HYP_NORM_TOP;
+	    hitp++;
+	}
+
+	VJOIN1(hitp->hit_vpriv, pp, k2, dp);
+	hitX = hitp->hit_vpriv[X];
+	hitY = hitp->hit_vpriv[Y];
+	if ((hyp->hyp_rx*hitX*hitX + hyp->hyp_ry*hitY*hitY) < hyp->hyp_bounds) {
+	    hitp->hit_magic = RT_HIT_MAGIC;
+	    hitp->hit_dist = k2;
+	    hitp->hit_surfno = HYP_NORM_BOTTOM;
+	    hitp++;
+	}
+
+	if (hitp == &hits[0] || hitp == &hits[1] || hitp == &hits[3])
+	    continue;		/* MISS */
+
+	if (hitp == &hits[2]) {
+	    /* 2 hits: single segment */
+	    segp[idx].seg_stp = stp[idx];
+	    if (hits[0].hit_dist < hits[1].hit_dist) {
+		segp[idx].seg_in = hits[0];	/* struct copy */
+		segp[idx].seg_out = hits[1];	/* struct copy */
+	    } else {
+		segp[idx].seg_in = hits[1];	/* struct copy */
+		segp[idx].seg_out = hits[0];	/* struct copy */
+	    }
+	} else {
+	    /* 4 hits: two segments; return the outer span [nearest, farthest].
+	     * 0,1 are sides; 2,3 are top/bottom. */
+	    struct hit sorted[4];
+
+	    if (hits[0].hit_dist > hits[1].hit_dist) {
+		sorted[1] = hits[1];
+		sorted[2] = hits[0];
+	    } else {
+		sorted[1] = hits[0];
+		sorted[2] = hits[1];
+	    }
+	    if (hits[2].hit_dist > hits[3].hit_dist) {
+		sorted[0] = hits[3];
+		sorted[3] = hits[2];
+	    } else {
+		sorted[0] = hits[2];
+		sorted[3] = hits[3];
+	    }
+
+	    segp[idx].seg_stp = stp[idx];
+	    segp[idx].seg_in = sorted[0];	/* nearest entry, struct copy */
+	    segp[idx].seg_out = sorted[3];	/* farthest exit, struct copy */
+	}
+    }
+}
+
+
+/**
  * Given ONE ray distance, return the normal and entry/exit point.
  */
-void
+C_DECL void
 rt_hyp_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
 {
     struct hyp_specific *hyp =
@@ -498,7 +649,7 @@ rt_hyp_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
 /**
  * Return the curvature of the hyp.
  */
-void
+C_DECL void
 rt_hyp_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
 {
     struct hyp_specific *hyp =
@@ -574,7 +725,7 @@ rt_hyp_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
  * u = azimuth
  * v = elevation
  */
-void
+C_DECL void
 rt_hyp_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct uvcoord *uvp)
 {
     struct hyp_specific *hyp =	(struct hyp_specific *)stp->st_specific;
@@ -620,7 +771,7 @@ rt_hyp_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct u
 }
 
 
-void
+C_DECL void
 rt_hyp_free(struct soltab *stp)
 {
     struct hyp_specific *hyp =
@@ -630,7 +781,7 @@ rt_hyp_free(struct soltab *stp)
 }
 
 
-int
+C_DECL int
 rt_hyp_plot(struct bu_list *vhead, struct rt_db_internal *incoming, const struct bg_tess_tol *UNUSED(ttol), const struct bn_tol *UNUSED(tol), const struct bview *UNUSED(info))
 {
     int i, j;		/* loop indices */
@@ -738,7 +889,7 @@ rt_hyp_plot(struct bu_list *vhead, struct rt_db_internal *incoming, const struct
  * -1 failure
  * 0 OK.  *r points to nmgregion that holds this tessellation.
  */
-int
+C_DECL int
 rt_hyp_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, const struct bg_tess_tol *ttol, const struct bn_tol *tol)
 {
     fastf_t c, dtol, f, mag_a, mag_h, ntol, r1, r2, r3, cprime;
@@ -1306,7 +1457,7 @@ rt_hyp_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, co
     return -1;
 }
 
-int
+C_DECL int
 rt_hyp_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !ip || !mat)
@@ -1339,7 +1490,7 @@ rt_hyp_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_inter
  *
  * Apply modeling transformations as well.
  */
-int
+C_DECL int
 rt_hyp_import5(struct rt_db_internal *ip, const struct bu_external *ep, const mat_t mat, const struct db_i *dbip)
 {
     struct rt_hyp_internal *hyp_ip;
@@ -1388,7 +1539,7 @@ rt_hyp_import5(struct rt_db_internal *ip, const struct bu_external *ep, const ma
  *
  * Apply the transformation to mm units as well.
  */
-int
+C_DECL int
 rt_hyp_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_hyp_internal *hyp_ip;
@@ -1430,7 +1581,7 @@ rt_hyp_export5(struct bu_external *ep, const struct rt_db_internal *ip, double l
  * line describes type of solid.  Additional lines are indented one
  * tab, and give parameter values.
  */
-int
+C_DECL int
 rt_hyp_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local)
 {
     struct rt_hyp_internal *hyp_ip;
@@ -1476,7 +1627,7 @@ rt_hyp_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose
  * Free the storage associated with the rt_db_internal version of this
  * solid.
  */
-void
+C_DECL void
 rt_hyp_ifree(struct rt_db_internal *ip)
 {
     struct rt_hyp_internal *hyp_ip;
@@ -1492,7 +1643,31 @@ rt_hyp_ifree(struct rt_db_internal *ip)
 }
 
 
-int
+C_DECL int
+rt_hyp_make(const struct rt_functab *ftp, struct rt_db_internal *intern, const char* UNUSED(variant), const point_t origin, double scale)
+{
+    struct rt_hyp_internal *hyp_ip;
+
+    intern->idb_major_type = DB5_MAJORTYPE_BRLCAD;
+    intern->idb_type = ID_HYP;
+    BU_ASSERT(&OBJ[intern->idb_type] == ftp);
+    intern->idb_meth = ftp;
+
+    BU_ALLOC(hyp_ip, struct rt_hyp_internal);
+    intern->idb_ptr = (void *)hyp_ip;
+    hyp_ip->hyp_magic = RT_HYP_INTERNAL_MAGIC;
+
+    VSET(hyp_ip->hyp_Vi, origin[X], origin[Y], origin[Z] - scale*0.5);
+    VSET(hyp_ip->hyp_Hi, 0.0, 0.0, scale);
+    VSET(hyp_ip->hyp_A, 0.0, scale*0.5, 0.0);
+    hyp_ip->hyp_b = scale*0.25;
+    hyp_ip->hyp_bnr = 0.4;
+
+    return BRLCAD_OK;
+}
+
+
+C_DECL int
 rt_hyp_params(struct pc_pc_set * UNUSED(ps), const struct rt_db_internal *ip)
 {
     if (ip) RT_CK_DB_INTERNAL(ip);
@@ -1501,7 +1676,7 @@ rt_hyp_params(struct pc_pc_set * UNUSED(ps), const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_hyp_centroid(point_t *cent, const struct rt_db_internal *ip)
 {
     if (cent != NULL && ip != NULL) {
@@ -1522,7 +1697,7 @@ rt_hyp_centroid(point_t *cent, const struct rt_db_internal *ip)
  * There is no known closed-form solution for the general case.
  * Use the Cauchy-Crofton ray-sampling estimator as a fallback.
  */
-void
+C_DECL void
 rt_hyp_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 {
     if (!area || !ip)
@@ -1531,7 +1706,7 @@ rt_hyp_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_hyp_volume(fastf_t *volume, const struct rt_db_internal *ip)
 {
     if (volume != NULL && ip != NULL) {
@@ -1549,7 +1724,7 @@ rt_hyp_volume(fastf_t *volume, const struct rt_db_internal *ip)
     }
 }
 
-int
+C_DECL int
 rt_hyp_labels(struct rt_point_labels *pl, int pl_max, const mat_t xform, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     int lcnt = 4;
@@ -1590,7 +1765,7 @@ rt_hyp_labels(struct rt_point_labels *pl, int pl_max, const mat_t xform, const s
     return lcnt;
 }
 
-const char *
+C_DECL const char *
 rt_hyp_keypoint(point_t *pt, const char *keystr, const mat_t mat, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     if (!pt || !ip)
@@ -1619,7 +1794,7 @@ hyp_kpt_end:
 }
 
 
-int
+C_DECL int
 rt_hyp_perturb(struct rt_db_internal **oip, const struct rt_db_internal *ip, int planar_only, fastf_t val)
 {
     if (NEAR_ZERO(val, SMALL_FASTF))

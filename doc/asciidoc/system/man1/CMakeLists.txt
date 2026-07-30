@@ -1,17 +1,29 @@
 set(
   man1_EN
   3dm-g.adoc
+  a-d.adoc
+  adrt_master.adoc
+  adrt_slave.adoc
   alias-pix.adoc
   ap-pix.adoc
+  ap203e2-g.adoc
+  ap214-g.adoc
+  ap242-g.adoc
+  archer.adoc
+  art.adoc
   asc-nmg.adoc
   asc-plot3.adoc
   asc2dsp.adoc
   asc2g.adoc
   bolt.adoc
+  bombardier.adoc
   bot_dump.adoc
   brep_simple.adoc
+  brledit.adoc
   brlman.adoc
   btclsh.adoc
+  bw-a.adoc
+  bw-d.adoc
   bw-fb.adoc
   bw-pix.adoc
   bw-png.adoc
@@ -29,17 +41,39 @@ set(
   bwshrink.adoc
   bwstat.adoc
   bwthresh.adoc
+  c-d.adoc
   cad_boundp.adoc
   cad_parea.adoc
   coil.adoc
   comgeom-g.adoc
   conv-vg2g.adoc
   cv.adoc
+  d-a.adoc
+  d-bw.adoc
+  d-f.adoc
+  d-i.adoc
+  d-u.adoc
+  d2-c.adoc
+  damdf.adoc
+  dauto.adoc
+  dauto2.adoc
   dbupgrade.adoc
+  dconv.adoc
+  ddisp.adoc
   decimate.adoc
+  dfft.adoc
+  dm_ogl_probe.adoc
+  dmod.adoc
+  double-asc.adoc
+  dpeak.adoc
   dpix-pix.adoc
+  dsel.adoc
+  dstats.adoc
+  dwin.adoc
   dxf-g.adoc
   enf-g.adoc
+  f-d.adoc
+  f-i.adoc
   fast4-g.adoc
   fb-bw.adoc
   fb-fb.adoc
@@ -61,42 +95,68 @@ set(
   fbserv.adoc
   fbstretch.adoc
   fbzoom.adoc
+  fence.adoc
   g-acad.adoc
+  g-ap203e2.adoc
+  g-ap214.adoc
+  g-ap242.adoc
   g-dot.adoc
   g-dxf.adoc
   g-egg.adoc
   g-iges.adoc
+  g-jack.adoc
   g-nff.adoc
   g-obj.adoc
+  g-off.adoc
   g-ply.adoc
   g-raw.adoc
   g-shell-rect.adoc
   g-step.adoc
   g-stl.adoc
   g-var.adoc
+  g-vdb.adoc
   g-voxel.adoc
   g-vrml.adoc
   g-x3d.adoc
   g2asc.adoc
   gastank.adoc
+  gchecker.adoc
+  gcv.adoc
   gdiff.adoc
   gencolor.adoc
+  gex.adoc
   gif-fb.adoc
   gif2fb.adoc
   gist.adoc
   glint.adoc
+  gltf-g.adoc
   gqa.adoc
+  gsh.adoc
   halftone.adoc
   handle.adoc
+  human.adoc
+  i-a.adoc
+  i-d.adoc
+  i-f.adoc
   icv.adoc
+  ifc-g.adoc
   iges-g.adoc
+  ihist.adoc
+  imgdiff.adoc
   imgdims.adoc
+  imod.adoc
+  isst.adoc
+  istats.adoc
+  jack-g.adoc
   loop.adoc
+  lowp.adoc
   mac-pix.adoc
   mged.adoc
+  naca456.adoc
   nastran-g.adoc
   nirt.adoc
   obj-g.adoc
+  off-g.adoc
   patch-g.adoc
   picket_fence.adoc
   pix-alias.adoc
@@ -105,8 +165,10 @@ set(
   pix-png.adoc
   pix-ppm.adoc
   pix-ps.adoc
+  pix-spm.adoc
   pix-sun.adoc
   pix2asc.adoc
+  pix3filter.adoc
   pixautosize.adoc
   pixbackgnd.adoc
   pixbgstrip.adoc
@@ -116,8 +178,11 @@ set(
   pixclump.adoc
   pixcmp.adoc
   pixcolors.adoc
+  pixcount.adoc
   pixcrop.adoc
   pixdiff.adoc
+  pixelswap.adoc
+  pixembed.adoc
   pixfade.adoc
   pixfilter.adoc
   pixhalve.adoc
@@ -138,6 +203,7 @@ set(
   pixtile.adoc
   pixuntile.adoc
   plot3-asc.adoc
+  plot3-dm.adoc
   plot3-fb.adoc
   plot3-plot3.adoc
   plot3-ps.adoc
@@ -145,11 +211,15 @@ set(
   plot3getframe.adoc
   plot3line2.adoc
   plot3rot.adoc
+  plot3stat.adoc
   ply-g.adoc
   png-bw.adoc
   png-fb.adoc
   png-pix.adoc
+  propeller.adoc
+  qisst.adoc
   random.adoc
+  raw-g.adoc
   remrt.adoc
   reshoot.adoc
   rpatch.adoc
@@ -163,16 +233,32 @@ set(
   rthide.adoc
   rtscale.adoc
   rtshot.adoc
+  rtsil.adoc
+  rtsrv.adoc
+  rtsurf.adoc
   rtweight.adoc
   rtwizard.adoc
   rtxray.adoc
   showshot.adoc
+  shp-g.adoc
+  smod.adoc
+  spm-fb.adoc
+  step-g.adoc
   stl-g.adoc
   sun-pix.adoc
   tankill-g.adoc
   terrain.adoc
+  tgf-g.adoc
   tire.adoc
+  tree.adoc
+  ttcp.adoc
+  u-a.adoc
+  u-bw.adoc
+  u-d.adoc
+  u-f.adoc
   ug-g.adoc
+  umod.adoc
+  ustats.adoc
   vdeck.adoc
   wavelet.adoc
   wdb_example.adoc
@@ -183,7 +269,6 @@ set(
 
 if(BRLCAD_EXTRADOCS)
   add_asciidoc("MAN1" benchmark.adoc man1 "" REQUIRED "rt")
-  add_asciidoc("MAN1" brlcad-config.adoc man1 "" REQUIRED "rt")
   add_asciidoc("MAN1" brlcad.adoc man1 "" REQUIRED "mged")
   add_asciidoc("MAN1" dbclean.adoc man1 "" REQUIRED "asc2g")
 
@@ -206,7 +291,6 @@ endif(BRLCAD_EXTRADOCS)
 cmakefiles(
   ${man1_EN}
   benchmark.adoc
-  brlcad-config.adoc
   brlcad.adoc
   dbclean.adoc
   CMakeLists.txt

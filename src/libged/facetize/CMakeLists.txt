@@ -9,6 +9,7 @@ set(
   brep.cpp
   facetize.cpp
   nmg.cpp
+  plan.cpp
   regions.cpp
   tri.cpp
   util.cpp
@@ -43,8 +44,6 @@ cmakefiles(
   old_facetize.h
   subprocess.h
   TODO
-  ${FACETIZE_SRCS}
-  ${OLD_FACETIZE_SRCS}
 )
 
 # Local Variables:

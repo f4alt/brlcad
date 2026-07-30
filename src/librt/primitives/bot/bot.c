@@ -298,7 +298,7 @@ clt_bot_pack(struct bu_pool *pool, struct soltab *stp)
 /**
  * Calculate an RPP for a BoT
  */
-int
+C_DECL int
 rt_bot_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct bn_tol *UNUSED(tol)) {
 
     RT_CK_DB_INTERNAL(ip);
@@ -470,7 +470,7 @@ copy_bot_tri(triangle_s* tris, fastf_t* tri_norms, const struct rt_bot_internal 
  * A struct bot_specific is created, and its address is stored in
  * stp->st_specific for use by bot_shot().
  */
-int
+C_DECL int
 rt_bot_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 {
     RT_CK_DB_INTERNAL(ip);
@@ -685,7 +685,7 @@ rt_bot_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 }
 
 
-void
+C_DECL void
 rt_bot_print(const struct soltab *UNUSED(stp))
 {
 }
@@ -832,8 +832,7 @@ bot_shot_hlbvh_flat(struct bvh_flat_node *root, struct xray* rp, triangle_s *tri
 		fastf_t dist = VDOT(wxb, wn) / dn;
 
 		// Fill out hitdata
-		struct hit cur_hit = {0};
-		cur_hit.hit_magic = RT_HIT_MAGIC;
+		struct hit cur_hit = RT_HIT_INIT_ZERO;
 		cur_hit.hit_dist = dist;
 		cur_hit.hit_vpriv[X] = VDOT(tri->face_norm, rp->r_dir);
 		cur_hit.hit_vpriv[Y] = gamma / abs_dn;
@@ -859,7 +858,7 @@ bot_shot_hlbvh_flat(struct bvh_flat_node *root, struct xray* rp, triangle_s *tri
 }
 
 
-THREADLOCAL hit_da hits_per_cpu = {0};
+THREADLOCAL hit_da hits_per_cpu = {0, 0, NULL};
 
 
 /**
@@ -876,7 +875,7 @@ THREADLOCAL hit_da hits_per_cpu = {0};
  * 0 MISS
  * >0 HIT
  */
-int
+C_DECL int
 rt_bot_shot(struct soltab *stp, struct xray *rp, struct application *ap, struct seg *seghead)
 {
     if (UNLIKELY(!stp || !ap || !seghead))
@@ -929,10 +928,291 @@ rt_bot_shot(struct soltab *stp, struct xray *rp, struct application *ap, struct 
 }
 
 
+/* Inverse ray direction avoiding inf/NaN, matching bot_shot_hlbvh_flat(). */
+static inline fastf_t
+bot_vshot_rdinv(fastf_t d)
+{
+    return 1.0 / (d + copysign((1.0 / MAX_FASTF), d));
+}
+
+
+/* Index of the lowest set bit (count trailing zeros) of a nonzero mask.
+ * Used to walk only the ACTIVE rays of a packet, so per-node work is
+ * proportional to the number of active rays rather than the packet size. */
+static inline int
+bot_ctz64(uint64_t x)
+{
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_ctzll(x);
+#elif defined(_MSC_VER)
+    unsigned long i;
+    _BitScanForward64(&i, x);
+    return (int)i;
+#else
+    int n = 0;
+    while (!((x >> n) & 1)) n++;
+    return n;
+#endif
+}
+
+
+#define BOT_VSHOT_PACKET 64	/* rays per packet (active mask is a uint64_t) */
+
+
+/*
+ * Intersect a packet of up to 64 coherent rays against ONE bot with a
+ * single BVH traversal.  An active-ray bitmask is carried down the tree:
+ * a node's bounds are loaded once and slab-tested against every active
+ * ray, and at a leaf each triangle is loaded once and tested against all
+ * still-active rays.  This amortizes the BVH node and triangle memory
+ * traffic across the packet -- the coherency win over calling
+ * rt_bot_shot() once per ray.
+ *
+ * A ray reaches a given leaf iff it passed the bbox test at that leaf and
+ * every ancestor -- exactly the condition the per-ray scalar traversal
+ * enforces -- and the per-triangle intersection math is identical to
+ * bot_shot_hlbvh_flat(), so each ray accumulates a bit-identical hit set.
+ * rt_bot_makesegs() is then reused per ray for correct mode/orientation
+ * handling, and the (possibly multiple) segments are collapsed to the
+ * outer span, matching the rt_tor_vshot() single-seg convention.
+ */
+static void
+bot_vshot_packet(struct soltab *stp, struct bot_specific *bot,
+		 struct spatial_partition_s *sps, struct xray **rp,
+		 struct seg *segp, int m, struct application *ap, fastf_t toldist)
+{
+    static THREADLOCAL hit_da vhits[BOT_VSHOT_PACKET];
+    vect_t inv_dir[BOT_VSHOT_PACKET];
+    point_t b_pt[BOT_VSHOT_PACKET];
+    struct bvh_flat_node *stack_node[HLBVH_STACK_SIZE];
+    uint64_t stack_mask[HLBVH_STACK_SIZE];
+    triangle_s *tris = sps->tris;
+    size_t ntris = bot->bot_ntri;
+    int sp, k;
+
+    /* Per-ray setup: inverse dir, backed-up origin, reset hit list. */
+    for (k = 0; k < m; k++) {
+	fastf_t backout;
+	inv_dir[k][0] = bot_vshot_rdinv(rp[k]->r_dir[0]);
+	inv_dir[k][1] = bot_vshot_rdinv(rp[k]->r_dir[1]);
+	inv_dir[k][2] = bot_vshot_rdinv(rp[k]->r_dir[2]);
+	backout = FMAX(0.0, -rp[k]->r_min);
+	b_pt[k][X] = rp[k]->r_pt[X] - backout * rp[k]->r_dir[X];
+	b_pt[k][Y] = rp[k]->r_pt[Y] - backout * rp[k]->r_dir[Y];
+	b_pt[k][Z] = rp[k]->r_pt[Z] - backout * rp[k]->r_dir[Z];
+	vhits[k].count = 0;
+	segp[k].seg_stp = (struct soltab *)0;
+    }
+
+    uint64_t full = (m >= 64) ? ~(uint64_t)0 : (((uint64_t)1 << m) - 1);
+
+    stack_node[0] = sps->root;
+    stack_mask[0] = full;
+    sp = 1;
+
+    while (sp > 0) {
+	struct bvh_flat_node *node;
+	uint64_t M, M2 = 0;
+
+	sp--;
+	node = stack_node[sp];
+	M = stack_mask[sp];
+
+	/* Slab-test this node's bounds against each active ray (walking
+	 * only the set bits of the active mask). */
+	uint64_t bits = M;
+	while (bits) {
+	    vect_t t_to_min, t_to_max, t_enter, t_exit;
+	    fastf_t entry_t, exit_t;
+	    k = bot_ctz64(bits);
+	    bits &= bits - 1;
+	    VSUB2(t_to_min, &node->bounds[0], b_pt[k]);
+	    VSUB2(t_to_max, &node->bounds[3], b_pt[k]);
+	    VELMUL(t_to_min, t_to_min, inv_dir[k]);
+	    VELMUL(t_to_max, t_to_max, inv_dir[k]);
+	    VMOVE(t_enter, t_to_min);
+	    VMOVE(t_exit, t_to_min);
+	    VMINMAX(t_enter, t_exit, t_to_max);
+	    entry_t = FMAX(t_enter[0], FMAX(t_enter[1], t_enter[2]));
+	    exit_t = FMIN(t_exit[0], FMIN(t_exit[1], t_exit[2]));
+	    if (!((exit_t < -SMALL_FASTF) || (entry_t > exit_t)))
+		M2 |= ((uint64_t)1 << k);
+	}
+	if (!M2)
+	    continue;
+
+	if (node->n_primitives > 0) {
+	    size_t end = node->data.first_prim_offset + node->n_primitives;
+	    size_t ti;
+	    BU_ASSERT(end <= ntris);
+	    for (ti = node->data.first_prim_offset; ti < end; ti++) {
+		triangle_s *tri = &tris[ti];
+		vect_t wn;
+		uint64_t lbits = M2;
+		VSCALE(wn, tri->face_norm, tri->face_norm_scalar);
+		while (lbits) {
+		    struct xray *r;
+		    vect_t wxb, xp;
+		    fastf_t dn, abs_dn, tol_multiplier, dn_plus_tol, beta, gamma, dist;
+		    struct hit cur_hit = RT_HIT_INIT_ZERO;
+		    k = bot_ctz64(lbits);
+		    lbits &= lbits - 1;
+		    r = rp[k];
+		    dn = VDOT(wn, r->r_dir);
+		    abs_dn = dn >= 0.0 ? dn : (-dn);
+		    if (abs_dn < BOT_MIN_DN)
+			continue;
+		    tol_multiplier = (1.0 / (1.0 + abs_dn));
+		    dn_plus_tol = abs_dn + (toldist * tol_multiplier);
+		    VSUB2(wxb, tri->A, r->r_pt);
+		    VCROSS(xp, wxb, r->r_dir);
+		    beta = VDOT(tri->AB, xp);
+		    gamma = VDOT(tri->AC, xp);
+		    beta = (dn > 0.0) ? -beta : beta;
+		    gamma = (dn < 0.0) ? -gamma : gamma;
+		    if ((beta + gamma > dn_plus_tol) || (beta < -toldist) || (gamma < -toldist))
+			continue;
+		    dist = VDOT(wxb, wn) / dn;
+		    cur_hit.hit_dist = dist;
+		    cur_hit.hit_vpriv[X] = VDOT(tri->face_norm, r->r_dir);
+		    cur_hit.hit_vpriv[Y] = gamma / abs_dn;
+		    cur_hit.hit_vpriv[Z] = beta / abs_dn;
+		    cur_hit.hit_private = tri;
+		    cur_hit.hit_surfno = tri->face_id;
+		    cur_hit.hit_rayp = r;
+		    DA_APPEND(&vhits[k], cur_hit, struct hit);
+		}
+	    }
+	    continue;
+	}
+
+	/* Internal node: descend both children with the surviving mask. */
+	if (UNLIKELY(sp + 2 > HLBVH_STACK_SIZE))
+	    bu_bomb("Stack size exceeded in bot vshot");
+	stack_node[sp] = node + 1;
+	stack_mask[sp] = M2;
+	sp++;
+	stack_node[sp] = node->data.other_child;
+	stack_mask[sp] = M2;
+	sp++;
+    }
+
+    /* Per-ray: sort hits, build segments, collapse to the outer span. */
+    for (k = 0; k < m; k++) {
+	size_t nhits = vhits[k].count;
+	struct hit *hh = vhits[k].items;
+	struct seg seghd;
+	struct seg *s;
+	struct hit best_in, best_out;
+	fastf_t mn, mx;
+	size_t a;
+
+	if (nhits == 0)
+	    continue;			/* MISS (seg_stp already NULL) */
+
+	/* insertion sort ascending by hit_dist (matches rt_bot_shot) */
+	for (a = 1; a < nhits; a++) {
+	    fastf_t a_dist = hh[a].hit_dist;
+	    struct hit swap = hh[a];
+	    long b;
+	    for (b = (long)a - 1; b >= 0; b--) {
+		if (hh[b].hit_dist < a_dist)
+		    break;
+		hh[b+1] = hh[b];
+	    }
+	    hh[b+1] = swap;
+	}
+
+	BU_LIST_INIT(&seghd.l);
+	rt_bot_makesegs(&vhits[k], stp, rp[k], ap, &seghd, NULL);
+	if (BU_LIST_IS_EMPTY(&seghd.l))
+	    continue;			/* MISS */
+
+	mn = INFINITY;
+	mx = -INFINITY;
+	for (BU_LIST_FOR(s, seg, &seghd.l)) {
+	    if (s->seg_in.hit_dist < mn) {
+		mn = s->seg_in.hit_dist;
+		best_in = s->seg_in;	/* struct copy */
+	    }
+	    if (s->seg_out.hit_dist > mx) {
+		mx = s->seg_out.hit_dist;
+		best_out = s->seg_out;	/* struct copy */
+	    }
+	}
+	segp[k].seg_stp = stp;
+	segp[k].seg_in = best_in;
+	segp[k].seg_out = best_out;
+
+	while (BU_LIST_WHILE(s, seg, &seghd.l)) {
+	    BU_LIST_DEQUEUE(&s->l);
+	    RT_FREE_SEG(s, ap->a_resource);
+	}
+    }
+}
+
+
+/**
+ * Vectorized counterpart to rt_bot_shot().
+ *
+ * Rays sharing the same bot soltab (a contiguous run in stp[]) are
+ * batched into packets and traced with a single coherent BVH traversal
+ * (see bot_vshot_packet()).  This is the scenario a ray-packet renderer
+ * produces; the experimental rt_vshootray() path instead sends one ray
+ * against many different solids, which degenerates to size-1 groups here
+ * (equivalent to the per-ray scalar traversal, no regression).
+ */
+C_DECL void
+rt_bot_vshot(struct soltab **stp, struct xray **rp, struct seg *segp, int n, struct application *ap)
+{
+    int i;
+
+    if (ap) RT_CK_APPLICATION(ap);
+
+    i = 0;
+    while (i < n) {
+	struct bot_specific *bot;
+	struct spatial_partition_s *sps;
+	fastf_t toldist;
+	int j, base;
+
+	if (stp[i] == 0) {
+	    i++;
+	    continue;			/* skip this ray */
+	}
+
+	/* gather the contiguous run of rays against this same bot */
+	j = i + 1;
+	while (j < n && stp[j] == stp[i])
+	    j++;
+
+	bot = (struct bot_specific *)stp[i]->st_specific;
+	sps = bot ? (struct spatial_partition_s *)bot->tie : NULL;
+	if (!bot || !sps) {
+	    int g;
+	    for (g = i; g < j; g++)
+		segp[g].seg_stp = (struct soltab *)0;
+	    i = j;
+	    continue;
+	}
+
+	toldist = 0.0;
+	if (bot->bot_orientation != RT_BOT_UNORIENTED && bot->bot_mode == RT_BOT_SOLID)
+	    toldist = (DBL_EPSILON * stp[i]->st_aradius * 10);
+
+	for (base = i; base < j; base += BOT_VSHOT_PACKET) {
+	    int pk = (j - base < BOT_VSHOT_PACKET) ? (j - base) : BOT_VSHOT_PACKET;
+	    bot_vshot_packet(stp[i], bot, sps, &rp[base], &segp[base], pk, ap, toldist);
+	}
+	i = j;
+    }
+}
+
+
 /**
  * Given ONE ray distance, return the normal and entry/exit point.
  */
-void
+C_DECL void
 rt_bot_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
 {
     struct bot_specific *bot=(struct bot_specific *)stp->st_specific;
@@ -996,7 +1276,7 @@ rt_bot_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
 /**
  * Return the curvature of the bot.
  */
-void
+C_DECL void
 rt_bot_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
 {
     if (stp) RT_CK_SOLTAB(stp);
@@ -1016,7 +1296,7 @@ rt_bot_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
  * u = azimuth
  * v = elevation
  */
-void
+C_DECL void
 rt_bot_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct uvcoord *uvp)
 {
     struct bot_specific *bot;
@@ -1047,7 +1327,7 @@ rt_bot_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct u
 }
 
 
-void
+C_DECL void
 rt_bot_free(struct soltab *stp)
 {
     struct bot_specific *bot = (struct bot_specific *)stp->st_specific;
@@ -1704,7 +1984,7 @@ rt_bot_makesegs(hit_da *hits, struct soltab *stp, struct xray *rp, struct applic
     return rt_bot_oriented_segs(hits, stp, ap, seghead, psp);
 }
 
-void
+C_DECL void
 rt_bot_centroid(point_t *cent, const struct rt_db_internal *ip)
 {
     size_t i;
@@ -1857,7 +2137,7 @@ rt_bot_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, co
  * Import an BOT from the database format to the internal format.
  * Apply modeling transformations as well.
  */
-int
+C_DECL int
 rt_bot_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     struct rt_bot_internal *bot_ip;
@@ -1934,7 +2214,7 @@ rt_bot_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fa
 /**
  * The name is added by the caller, in the usual place.
  */
-int
+C_DECL int
 rt_bot_export4(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_bot_internal *bot_ip;
@@ -2031,7 +2311,7 @@ rt_bot_export4(struct bu_external *ep, const struct rt_db_internal *ip, double l
     return 0;
 }
 
-int
+C_DECL int
 rt_bot_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !ip || !mat)
@@ -2083,7 +2363,7 @@ rt_bot_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_inter
 }
 
 
-int
+C_DECL int
 rt_bot_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     struct rt_bot_internal *bip;
@@ -2257,7 +2537,7 @@ rt_bot_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fa
 }
 
 
-int
+C_DECL int
 rt_bot_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_bot_internal *bip;
@@ -2451,28 +2731,28 @@ rt_bot_export5(struct bu_external *ep, const struct rt_db_internal *ip, double l
 }
 
 
-static char *unoriented="unoriented";
-static char *ccw="counter-clockwise";
-static char *cw="clockwise";
-static char *unknown_orientation="unknown orientation";
-static char *surface="\tThis is a surface with no volume\n";
-static char *solid="\tThis is a solid object (not just a surface)\n";
-static char *plate="\tThis is a FASTGEN plate mode solid\n";
-static char *nocos="\tThis is a plate mode solid with no obliquity angle effect\n";
-static char *unknown_mode="\tunknown mode\n";
+static const char *unoriented="unoriented";
+static const char *ccw="counter-clockwise";
+static const char *cw="clockwise";
+static const char *unknown_orientation="unknown orientation";
+static const char *surface="\tThis is a surface with no volume\n";
+static const char *solid="\tThis is a solid object (not just a surface)\n";
+static const char *plate="\tThis is a FASTGEN plate mode solid\n";
+static const char *nocos="\tThis is a plate mode solid with no obliquity angle effect\n";
+static const char *unknown_mode="\tunknown mode\n";
 
 /**
  * Make human-readable formatted presentation of this solid.  First
  * line describes type of solid.  Additional lines are indented one
  * tab, and give parameter values.
  */
-int
+C_DECL int
 rt_bot_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local)
 {
     struct rt_bot_internal *bot_ip =
 	(struct rt_bot_internal *)ip->idb_ptr;
     char buf[256];
-    char *orientation, *mode;
+    const char *orientation, *mode;
     size_t i;
 
     size_t badVertexCount = 0;
@@ -2570,7 +2850,7 @@ rt_bot_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose
 	    bu_vls_strcat(str, "\n");
 	}
 	if (bot_ip->mode == RT_BOT_PLATE || bot_ip->mode == RT_BOT_PLATE_NOCOS) {
-	    char *face_mode;
+	    const char *face_mode;
 
 	    if (BU_BITTEST(bot_ip->face_mode, i))
 		face_mode = "appended to hit point";
@@ -2637,7 +2917,7 @@ rt_bot_internal_free(struct rt_bot_internal *bot_ip)
  * Free the storage associated with the rt_db_internal version of this
  * solid.
  */
-void
+C_DECL void
 rt_bot_ifree(struct rt_db_internal *ip)
 {
     struct rt_bot_internal *bot_ip;
@@ -2652,7 +2932,7 @@ rt_bot_ifree(struct rt_db_internal *ip)
 }
 
 
-int
+C_DECL int
 rt_bot_xform(struct rt_db_internal *op, const fastf_t *mat, struct rt_db_internal *ip, const int release, struct db_i *dbip)
 {
     struct rt_bot_internal *botip, *botop;
@@ -2912,7 +3192,7 @@ rt_bot_find_e_nearest_pt2(
 }
 
 
-static char *modes[]={
+static const char *modes[]={
     "ERROR: Unrecognized mode",
     "surf",
     "volume",
@@ -2921,7 +3201,7 @@ static char *modes[]={
 };
 
 
-static char *orientation[]={
+static const char *orientation[]={
     "ERROR: Unrecognized orientation",
     "no",
     "rh",
@@ -2929,7 +3209,7 @@ static char *orientation[]={
 };
 
 
-static char *los[]={
+static const char *los[]={
     "center",
     "append"
 };
@@ -2959,7 +3239,7 @@ static char *los[]={
  * db get name orient	get orientation (no, rh, lh)
  * db get name flags	get BOT flags
  */
-int
+C_DECL int
 rt_bot_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *attr)
 {
     struct rt_bot_internal *bot=(struct rt_bot_internal *)intern->idb_ptr;
@@ -3256,7 +3536,7 @@ bot_check_vertex_indices(struct bu_vls *logstr, struct rt_bot_internal *bot)
  * db adjust name orient	set orientation (no, rh, lh)
  * db adjust name flags		set flags
  */
-int
+C_DECL int
 rt_bot_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv)
 {
     struct rt_bot_internal *bot;
@@ -3838,7 +4118,7 @@ rt_bot_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, co
 }
 
 
-int
+C_DECL int
 rt_bot_form(struct bu_vls *logstr, const struct rt_functab *ftp)
 {
     RT_CK_FUNCTAB(ftp);
@@ -3850,7 +4130,41 @@ rt_bot_form(struct bu_vls *logstr, const struct rt_functab *ftp)
 }
 
 
-int
+C_DECL int
+rt_bot_make(const struct rt_functab* ftp, struct rt_db_internal* intern, const char* UNUSED(variant), const point_t origin, double scale)
+{
+    struct rt_bot_internal *bot_ip;
+
+    intern->idb_major_type = DB5_MAJORTYPE_BRLCAD;
+    intern->idb_type = ID_BOT;
+    BU_ASSERT(&OBJ[intern->idb_type] == ftp);
+    intern->idb_meth = ftp;
+
+    BU_ALLOC(bot_ip, struct rt_bot_internal);
+    intern->idb_ptr = (void *)bot_ip;
+    bot_ip->magic = RT_BOT_INTERNAL_MAGIC;
+    bot_ip->mode = RT_BOT_SOLID;
+    bot_ip->orientation = RT_BOT_UNORIENTED;
+    bot_ip->num_vertices = 4;
+    bot_ip->num_faces = 4;
+    bot_ip->faces = (int *)bu_calloc(bot_ip->num_faces * 3, sizeof(int), "BOT faces");
+    bot_ip->vertices = (fastf_t *)bu_calloc(bot_ip->num_vertices * 3, sizeof(fastf_t), "BOT vertices");
+    bot_ip->thickness = (fastf_t *)NULL;
+    bot_ip->face_mode = (struct bu_bitv *)NULL;
+    VSET(&bot_ip->vertices[0],  origin[X], origin[Y], origin[Z]);
+    VSET(&bot_ip->vertices[3], origin[X]-0.5*scale, origin[Y]+0.5*scale, origin[Z]-scale);
+    VSET(&bot_ip->vertices[6], origin[X]-0.5*scale, origin[Y]-0.5*scale, origin[Z]-scale);
+    VSET(&bot_ip->vertices[9], origin[X]+0.5*scale, origin[Y]+0.5*scale, origin[Z]-scale);
+    VSET(&bot_ip->faces[0], 0, 3, 1);
+    VSET(&bot_ip->faces[3], 0, 1, 2);
+    VSET(&bot_ip->faces[6], 0, 2, 3);
+    VSET(&bot_ip->faces[9], 1, 3, 2);
+
+    return BRLCAD_OK;
+}
+
+
+C_DECL int
 rt_bot_params(struct pc_pc_set *ps, const struct rt_db_internal *ip)
 {
     if (!ps) return 0;
@@ -4928,7 +5242,7 @@ rt_bot_smooth(struct rt_bot_internal *bot, const char *bot_name, struct db_i *db
 
     if (bot->orientation == RT_BOT_UNORIENTED) {
 	/* need to do raytracing, do prepping */
-	rtip = rt_new_rti(dbip);
+	rtip = rt_i_create(dbip);
 
 	RT_APPLICATION_INIT(&ap);
 	ap.a_rt_i = rtip;
@@ -4972,7 +5286,7 @@ rt_bot_smooth(struct rt_bot_internal *bot, const char *bot_name, struct db_i *db
 	    ap.a_user = i;
 	    (void) rt_shootray(&ap);
 	}
-	rt_free_rti(rtip);
+	rt_i_destroy(rtip);
     } else {
 	/* calculate normals */
 	for (i = 0; i < bot->num_faces; i++) {
@@ -5713,7 +6027,7 @@ rt_bot_list_free(struct rt_bot_list *headRblp, int fbflag)
 }
 
 
-void
+C_DECL void
 rt_bot_volume(fastf_t *volume, const struct rt_db_internal *ip)
 {
     /* contains information used to analyze a polygonal face */
@@ -5781,7 +6095,7 @@ rt_bot_volume(fastf_t *volume, const struct rt_db_internal *ip)
     bu_free((char *)face.pts, "rt_bot_volume: pts");
 }
 
-void
+C_DECL void
 rt_bot_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 {
     typedef point_t triangle[3];
@@ -6022,7 +6336,7 @@ rt_bot_merge(size_t num_bots, const struct rt_bot_internal * const *bots)
     return result;
 }
 
-const char *
+C_DECL const char *
 rt_bot_keypoint(point_t *pt, const char *keystr, const mat_t mat, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     if (!pt || !ip)
@@ -6047,6 +6361,53 @@ bot_kpt_end:
     MAT4X3PNT(*pt, mat, mpt);
 
     return k;
+}
+
+
+
+int
+rt_bot_functab_validate(struct bu_vls *error_msg, const struct rt_db_internal *ip, const struct bn_tol *tol)
+{
+    struct rt_bot_internal *bot;
+    int issues = 0;
+    size_t i;
+    int not_solid = 0;
+
+    RT_CK_DB_INTERNAL(ip);
+    bot = (struct rt_bot_internal *)ip->idb_ptr;
+    RT_BOT_CK_MAGIC(bot);
+
+    for (i = 0; i < bot->num_faces; i++) {
+        fastf_t curr_c[3];
+        fastf_t curr_b[6];
+        int ok = validate_bot_face(curr_c, curr_b, bot, i, tol);
+        if (!ok) {
+            issues |= 1;
+        }
+    }
+
+    /* Check manifold status if it's supposed to be a solid */
+    if (bot->mode == RT_BOT_SOLID) {
+        not_solid = bg_trimesh_solid2(bot->num_vertices, bot->num_faces, bot->vertices, bot->faces, NULL);
+        if (not_solid) {
+            issues |= 2;
+        }
+    }
+
+    if (issues && error_msg) {
+        const char *comma = "";
+        bu_vls_printf(error_msg, "[");
+        if (issues & 1) {
+            bu_vls_printf(error_msg, "%s{\"problem_type\":\"invalid_face\"}", comma);
+            comma = ",";
+        }
+        if (issues & 2) {
+            bu_vls_printf(error_msg, "%s{\"problem_type\":\"non_manifold\"}", comma);
+        }
+        bu_vls_printf(error_msg, "]");
+    }
+
+    return issues;
 }
 
 /** @} */

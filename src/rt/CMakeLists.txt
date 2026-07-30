@@ -7,14 +7,18 @@ set(
   do.c
   grid.c
   heatgraph.c
-  main.c
   opt.c
   scanline.c
   usage.cpp
   worker.c
 )
 
-brlcad_addlib(librtuif "${LIBRTUIF_SOURCES}" "librt;${M_LIBRARY}" "" "${CMAKE_CURRENT_SOURCE_DIR}" STATIC NO_INSTALL)
+brlcad_addlib(librtuif "${LIBRTUIF_SOURCES}" "" "${CMAKE_CURRENT_SOURCE_DIR}"
+  STATIC NO_INSTALL NO_STATIC_LINK_TEST
+  PRIVATE_LIBS librt ${M_LIBRARY}
+)
+
+list(APPEND LIBRTUIF_SOURCES main.c)
 
 if(BRLCAD_ENABLE_OPENCL)
   set(OPENCL_LIBS ${OPENCL_LIBRARIES})
@@ -76,6 +80,7 @@ set_property(TARGET rthide APPEND PROPERTY COMPILE_DEFINITIONS "RT_TXT_OUTPUT")
 
 brlcad_addexec(rtsil "${LIBRTUIF_SOURCES};viewsil.c" "${RT_STD_LIBS}" FOLDER Rt)
 target_include_directories(rtsil BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+set_property(TARGET rtsil APPEND PROPERTY COMPILE_DEFINITIONS "RT_RAW_OUTPUT")
 add_target_deps(rtxray dm_plugins)
 
 brlcad_addexec(rtsurf "rtsurf.c;rtsurf_hits.cpp" "libanalyze;librt;libdm;liboptical;libicv")
@@ -129,7 +134,9 @@ set(
   tests/test_rt_opt.c
 )
 
-brlcad_addexec(test_rt_opt "${RT_OPT_TEST_SRCS}" "${RT_STD_LIBS}" TEST)
+brlcad_addexec(test_rt_opt "${RT_OPT_TEST_SRCS}" "${RT_STD_LIBS}" TEST
+  UNITY_BUILD_SKIP tests/test_rt_opt.c
+)
 target_include_directories(test_rt_opt BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 set_property(
   TARGET test_rt_opt

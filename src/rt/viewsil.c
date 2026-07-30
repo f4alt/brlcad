@@ -41,8 +41,6 @@
 #include "./ext.h"
 
 
-extern FILE *outfp;
-extern size_t width, height;
 static unsigned char *scanline;
 
 /*
@@ -56,7 +54,7 @@ struct bu_structparse view_parse[] = {
     {"",	0, (char *)0,	0,	BU_STRUCTPARSE_FUNC_NULL, NULL, NULL}
 };
 
-const char title[] = "RT Simple Intersection Lightmap";
+EXTERNCPP const char title[] = "RT Simple Intersection Lightmap";
 
 
 int	rayhit(register struct application *ap, struct partition *PartHeadp, struct seg *segp);
@@ -166,9 +164,10 @@ raymiss(register struct application *ap)
     return 0;
 }
 
-void
+C_DECL void
 application_init (void)
 {
+    option("", "-o file.bw", "Output black & white silhouette image", 0);
     option("Raytrace", "-i", "Enable incremental (progressive-style) rendering", 1);
     option("Raytrace", "-t", "Render from top to bottom (default: from bottom up)", 1);
 }

@@ -54,7 +54,7 @@
  */
 #define ECMD_DSP_SET_DATASRC    25062
 
-void
+C_DECL void
 rt_edit_dsp_set_edit_mode(struct rt_edit *s, int mode)
 {
     rt_edit_set_edflag(s, mode);
@@ -96,7 +96,7 @@ struct rt_edit_menu_item dsp_menu[] = {
     { "", NULL, 0 }
 };
 
-struct rt_edit_menu_item *
+C_DECL struct rt_edit_menu_item *
 rt_edit_dsp_menu_item(const struct bn_tol *UNUSED(tol))
 {
     return dsp_menu;
@@ -196,6 +196,31 @@ static const struct rt_edit_param_desc dsp_datasrc_params[] = {
     }
 };
 
+static const struct rt_edit_param_desc dsp_fsize_params[] = {
+    {
+	"xcnt",               /* name         */
+	"Width (samples)",    /* label        */
+	RT_EDIT_PARAM_INTEGER, /* type        */
+	0,                    /* index        */
+	1.0,                  /* range_min    */
+	RT_EDIT_PARAM_NO_LIMIT, /* range_max  */
+	NULL,                 /* units        */
+	0, NULL, NULL,        /* enum (unused) */
+	"dsp_xcnt"            /* prim_field   */
+    },
+    {
+	"ycnt",               /* name         */
+	"Height (samples)",   /* label        */
+	RT_EDIT_PARAM_INTEGER, /* type        */
+	1,                    /* index        */
+	1.0,                  /* range_min    */
+	RT_EDIT_PARAM_NO_LIMIT, /* range_max  */
+	NULL,                 /* units        */
+	0, NULL, NULL,        /* enum (unused) */
+	"dsp_ycnt"            /* prim_field   */
+    }
+};
+
 static const struct rt_edit_cmd_desc dsp_cmds[] = {
     {
 	ECMD_DSP_FNAME,       /* cmd_id       */
@@ -204,7 +229,8 @@ static const struct rt_edit_cmd_desc dsp_cmds[] = {
 	1,                    /* nparam       */
 	dsp_fname_params,     /* params       */
 	0,                    /* interactive  */
-	10                    /* display_order */
+	10                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_DSP_SCALE_X,     /* cmd_id       */
@@ -213,7 +239,8 @@ static const struct rt_edit_cmd_desc dsp_cmds[] = {
 	1,                    /* nparam       */
 	dsp_scale_x_params,   /* params       */
 	1,                    /* interactive  */
-	20                    /* display_order */
+	20                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_DSP_SCALE_Y,     /* cmd_id       */
@@ -222,7 +249,8 @@ static const struct rt_edit_cmd_desc dsp_cmds[] = {
 	1,                    /* nparam       */
 	dsp_scale_y_params,   /* params       */
 	1,                    /* interactive  */
-	30                    /* display_order */
+	30                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_DSP_SCALE_ALT,   /* cmd_id       */
@@ -231,7 +259,8 @@ static const struct rt_edit_cmd_desc dsp_cmds[] = {
 	1,                    /* nparam       */
 	dsp_scale_alt_params, /* params       */
 	1,                    /* interactive  */
-	40                    /* display_order */
+	40                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_DSP_SET_SMOOTH,  /* cmd_id       */
@@ -240,7 +269,18 @@ static const struct rt_edit_cmd_desc dsp_cmds[] = {
 	1,                    /* nparam       */
 	dsp_smooth_params,    /* params       */
 	0,                    /* interactive  */
-	50                    /* display_order */
+	50                    /* display_order */,
+	NULL                  /* req_types */
+    },
+    {
+	ECMD_DSP_FSIZE,       /* cmd_id       */
+	"Set File Size",      /* label        */
+	"data",               /* category     */
+	2,                    /* nparam       */
+	dsp_fsize_params,     /* params       */
+	0,                    /* interactive  */
+	15                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_DSP_SET_DATASRC, /* cmd_id       */
@@ -249,18 +289,21 @@ static const struct rt_edit_cmd_desc dsp_cmds[] = {
 	1,                    /* nparam       */
 	dsp_datasrc_params,   /* params       */
 	0,                    /* interactive  */
-	20                    /* display_order */
+	20                    /* display_order */,
+	NULL                  /* req_types */
     }
 };
 
 static const struct rt_edit_prim_desc dsp_prim_desc = {
     "dsp",                /* prim_type    */
     "Displacement Map",   /* prim_label   */
-    6,                    /* ncmd         */
-    dsp_cmds              /* cmds         */
+    7,                    /* ncmd         */
+    dsp_cmds              /* cmds         */,
+    0,                    /* nopt         */
+    NULL                  /* opts         */
 };
 
-const struct rt_edit_prim_desc *
+C_DECL const struct rt_edit_prim_desc *
 rt_edit_dsp_edit_desc(void)
 {
     return &dsp_prim_desc;
@@ -418,6 +461,34 @@ ecmd_dsp_fname(struct rt_edit *s)
  * e_para[0] = 0 → disable, non-zero → enable; e_inpara = 1.
  * With e_inpara == 0, the current value is toggled. */
 static int
+ecmd_dsp_fsize(struct rt_edit *s)
+{
+    struct rt_dsp_internal *dsp =
+	(struct rt_dsp_internal *)s->es_int.idb_ptr;
+    RT_DSP_CK_MAGIC(dsp);
+
+    /* Two integer parameters: xcnt and ycnt */
+    if (s->e_inpara != 2) {
+	bu_vls_printf(s->log_str,
+		      "ERROR: two arguments needed (width height)\n");
+	s->e_inpara = 0;
+	return BRLCAD_ERROR;
+    }
+    if (s->e_para[0] < 1.0 || s->e_para[1] < 1.0) {
+	bu_vls_printf(s->log_str,
+		      "ERROR: width and height must be >= 1\n");
+	s->e_inpara = 0;
+	return BRLCAD_ERROR;
+    }
+
+    dsp->dsp_xcnt = (uint32_t)s->e_para[0];
+    dsp->dsp_ycnt = (uint32_t)s->e_para[1];
+
+    s->e_inpara = 0;
+    return BRLCAD_OK;
+}
+
+int
 ecmd_dsp_set_smooth(struct rt_edit *s)
 {
     struct rt_dsp_internal *dsp =
@@ -472,7 +543,7 @@ ecmd_dsp_set_datasrc(struct rt_edit *s)
     return BRLCAD_OK;
 }
 
-int
+C_DECL int
 rt_edit_dsp_edit(struct rt_edit *s)
 {
     switch (s->edit_flag) {
@@ -497,6 +568,8 @@ rt_edit_dsp_edit(struct rt_edit *s)
 	    if (ecmd_dsp_fname(s) != BRLCAD_OK)
 		return -1;
 	    break;
+	case ECMD_DSP_FSIZE:
+	    return ecmd_dsp_fsize(s);
 	case ECMD_DSP_SET_SMOOTH:
 	    return ecmd_dsp_set_smooth(s);
 	case ECMD_DSP_SET_DATASRC:
@@ -508,7 +581,7 @@ rt_edit_dsp_edit(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_dsp_edit_xy(
 	struct rt_edit *s,
 	const vect_t mousevec

@@ -4,99 +4,92 @@
 :manmanual: BRL-CAD
 
 == NAME
-gif-fb - display GIF file on frame buffer
+
+gif-fb - display a GIF image on a frame buffer
 
 == SYNOPSIS
 
 [source]
 ----
-gif-fb [ -F frame_buffer_file] [-c] [ -i image_number] [-o] [-v] [-z] [ GIF_file_name]
+gif-fb [-c] [-o] [-v] [-z] [-F _frame_buffer_] [-i _image#_] [_gif_file_]
 ----
 
 
 [[description]]
 == DESCRIPTION
 
-*gif-fb* displays on a frame buffer the images described by a CompuServe GIF (Graphics Interchange Format) file.
+*gif-fb* decodes a CompuServe GIF (Graphics Interchange Format) image and
+writes it to a frame buffer.  If no _gif_file_ is given, the GIF data is read
+from standard input.  Multi-image GIF files are displayed sequentially unless a
+single image is selected with *-i*.  The requested frame buffer is sized to the
+GIF screen dimensions, and the image is written right-side-up at the bottom of
+the available frame buffer.
 
 [[options]]
-=== Options
-
-
-*-F* _frame_buffer_name_::
-Outputs to the specified frame buffer instead of the one specified by the *FB_FILE* environment variable (or the default frame buffer, if *FB_FILE* is not set). The frame buffer size requested will be the same as the input GIF screen size. The actual size obtained depends on details of the specific frame buffer.
-
+== OPTIONS
 
 *-c*::
-Uses all 8 bits per channel for color maps supplied in the GIF file, overriding the color resolution specified in the GIF file. (While technically a violation of the GIF standard, apparently some GIF implementations assume this interpretation.)
-
-
-*-i*::
-Displays just the specified image (starting counting with 1), rather than displaying all images as the GIF specification requires.
-
+  Force 8 bits of color resolution per R, G, and B channel, overriding the
+  color resolution declared in the GIF file.  Some non-standard GIF writers
+  require this.
 
 *-o*::
-(overlay) Skips the initial clearing of the frame buffer to the background color specified in the GIF file.
-
+  Overlay mode.  Skip the initial clearing of the frame buffer to the GIF
+  background color, leaving existing frame buffer contents in place.
 
 *-v*::
-(verbose) Also prints information about the GIF images on the standard error output.
-
+  Verbose mode.  Print information about the GIF screen, color maps, and each
+  image to standard error.
 
 *-z*::
-(zoom) Uses the zoom capability of the current framebuffer to make the image as large as possible on the screen while preserving a square aspect ratio to the pixels. This means that the zoom factor in X and Y will be equal to the smaller of the two possible zooms.
+  Zoom the frame buffer to enlarge the image as much as possible while keeping
+  a square pixel aspect ratio.
 
+*-F* _frame_buffer_::
+  Write to the named frame buffer instead of the one given by the *FB_FILE*
+  environment variable (or the default frame buffer if *FB_FILE* is unset).
 
-__GIF_file_name__::
-Specifies the GIF input file to be translated, rather than reading the file from the standard input.
+*-i* _image#_::
+  Display only the given image (1-indexed) from a multi-image GIF, rather than
+  all images.
 
+[[examples]]
+== EXAMPLES
 
+.Convert a GIF to a BRL-CAD pix file
+====
+[source,bash]
+----
+gif-fb -F /dev/mem image.gif && fb-pix -F /dev/mem image.pix
+----
+Decode a GIF into an in-memory frame buffer and capture it with *fb-pix*(1),
+producing a *pix*(5) file for use with the rest of the BRL-CAD image tools.
+====
 
-
-
-[[discussion]]
-== DISCUSSION
-
-The GIF standard is far from an ideal specification for frame buffer images, but it has been widely accepted in the personal computer arena, and consequently there are a large number of images stored in GIF format on bulletin-board systems and other information services. Since most personal computer systems have GIF translators available for them, *gif-fb* provides a means of converting most images from such systems into a form suitable for processing with other BRL-CAD utilities.
-
-Notice that multiple images within a single GIF file can achieve animation effects.
-
-
-[[example]]
-== EXAMPLE
-
-The following is a typical invocation:
-
-
-....
-
-gif-fb image.gif
-....
-
+.View a single frame of an animated GIF, zoomed
+====
+[source,bash]
+----
+gif-fb -z -i 3 animation.gif
+----
+Display only the third image of a multi-image GIF on the default frame buffer,
+zoomed to fill the display while preserving square pixels.
+====
 
 [[see_also]]
 == SEE ALSO
 
-A Standard Defining a Mechanism for the Storage and Transmission of Raster-Based Graphics Information, June 15, 1987 (CompuServe Incorporated).*libfb*(3)
-
-
-[[diagnostics]]
-== DIAGNOSTICS
-
-Error messages are intended to be self-explanatory.
-
+*brlcad*(1), *gif2fb*(1), *fb-pix*(1), *fb-png*(1), *pix-fb*(1), *fbclear*(1), *pix*(5)
 
 [[author]]
 == AUTHOR
 
-Douglas A. Gwyn, BRL/VLD-VMB
-
+BRL-CAD Team
 
 [[copyright]]
 == COPYRIGHT
 
 This software is Copyright (c) 1989-2026 by the United States Government as represented by U.S. Army Research Laboratory.
-
 
 [[bug_reports]]
 == BUG REPORTS

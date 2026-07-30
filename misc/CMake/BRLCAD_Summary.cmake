@@ -252,7 +252,6 @@ function(BRLCAD_Summary)
 
   ext_report("Asset Import Library" ASSIMP_STATUS REQUIRED_VARS "BRLCAD_ENABLE_ASSETIMPORT")
   ext_report("Eigen" EIGEN3_INCLUDE_DIR)
-  ext_report("Geogram" GEOGRAM_STATUS)
   ext_report("Geospatial Data Abstraction Library" GDAL_STATUS REQUIRED_VARS "BRLCAD_ENABLE_GDAL")
   ext_report("Lightning Memory-Mapped Database" LMDB_STATUS)
   ext_report("Manifold" MANIFOLD_STATUS)
@@ -277,7 +276,7 @@ function(BRLCAD_Summary)
   ext_report("STEPcode" STEPCODE_STATUS REQUIRED_VARS "BRLCAD_ENABLE_STEP")
   ext_report("Tcl" TCL_LIBRARY REQUIRED_VARS "BRLCAD_ENABLE_TCL")
   ext_report("Tk" TK_LIBRARY REQUIRED_VARS "BRLCAD_ENABLE_TCL")
-  ext_report("Zlib" ZLIB_LIBRARY)
+  ext_report("Zlib" ZLIB_STATUS)
 
   # Find the maximum label length
   set(LABEL_LENGTH 0)
@@ -370,6 +369,7 @@ function(BRLCAD_Summary)
   set(BRLCAD_SMP_LABEL "Build SMP-capable release ")
   set(BUILD_STATIC_LIBS_LABEL "Build static libraries ")
   set(BUILD_SHARED_LIBS_LABEL "Build dynamic libraries ")
+  set(BRLCAD_ENABLE_BRLCAD_LIBRARY_LABEL "Build aggregate brlcad library ")
   set(BRLCAD_WARNINGS_LABEL "Print verbose compilation warnings ")
   set(BRLCAD_VERBOSE_LABEL "Print verbose compilation progress ")
   set(BRLCAD_INSTALL_EXAMPLE_GEOMETRY_LABEL "Install example geometry models ")
@@ -389,6 +389,7 @@ function(BRLCAD_Summary)
     BRLCAD_OPTIMIZED
     BUILD_STATIC_LIBS
     BUILD_SHARED_LIBS
+    BRLCAD_ENABLE_BRLCAD_LIBRARY
     BRLCAD_INSTALL_EXAMPLE_GEOMETRY
     BRLCAD_EXTRADOCS_BUILD
   )

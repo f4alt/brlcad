@@ -26,6 +26,9 @@
 
 #include "common.h"
 
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <math.h>
 
@@ -46,7 +49,7 @@
 #define SAT 1
 #define VAL 2
 
-static char *file_name;
+static const char *file_name;
 static FILE *infp;
 
 static int fileinput = 0;	/* Is input a file (not stdin)? */
@@ -93,9 +96,28 @@ Usage: pixborder [-b 'R G B'] [-e 'R G B'] [-i 'R G B'] [-t 'R G B']\n\
 static int read_hsv (fastf_t *hsvp, char *buf)
 {
     double tmp[3];
+    int i = 0;
+    const char *cp = buf;
+    char *end = NULL;
 
-    if (sscanf(buf, "%lf %lf %lf", tmp, tmp + 1, tmp + 2) != 3)
+    for (i = 0; i < 3; i++) {
+	while (isspace((unsigned char)*cp))
+	    cp++;
+	if (*cp == '\0')
+	    return 0;
+
+	errno = 0;
+	tmp[i] = strtod(cp, &end);
+	if (errno != 0 || end == cp)
+	    return 0;
+	cp = end;
+    }
+
+    while (isspace((unsigned char)*cp))
+	cp++;
+    if (*cp != '\0')
 	return 0;
+
     if ((tmp[HUE] < 0.0) || (tmp[HUE] > 360.0)
 	|| (tmp[SAT] < 0.0) || (tmp[SAT] > 1.0)
 	|| (tmp[VAL] < 0.0) || (tmp[VAL] > 1.0))
@@ -103,6 +125,40 @@ static int read_hsv (fastf_t *hsvp, char *buf)
     if (ZERO(tmp[SAT]))
 	tmp[HUE] = ACHROMATIC;
     VMOVE(hsvp, tmp);
+    return 1;
+}
+
+static int
+parse_positive_size_arg(const char *arg, size_t *out_value, const char *label)
+{
+    char *end = NULL;
+    unsigned long long int value;
+
+    errno = 0;
+    value = strtoull(arg, &end, 10);
+    if (errno != 0 || end == arg || *end != '\0' || value == 0) {
+	(void) fprintf(stderr, "pixborder: invalid %s '%s'\n", label, arg);
+	return 0;
+    }
+
+    *out_value = (size_t)value;
+    return 1;
+}
+
+static int
+parse_nonnegative_ssize_arg(const char *arg, ssize_t *out_value, const char *label)
+{
+    char *end = NULL;
+    long long int value;
+
+    errno = 0;
+    value = strtoll(arg, &end, 10);
+    if (errno != 0 || end == arg || *end != '\0' || value < 0) {
+	(void) fprintf(stderr, "pixborder: invalid %s '%s'\n", label, arg);
+	return 0;
+    }
+
+    *out_value = (ssize_t)value;
     return 1;
 }
 
@@ -373,11 +429,14 @@ get_args (int argc, char **argv)
 		colors_specified |= COLORS_INTERIOR;
 		break;
 	    case 'n':
-		file_height = atoi(bu_optarg);
+		if (!parse_positive_size_arg(bu_optarg, &file_height, "file height"))
+		    return 0;
 		autosize = 0;
 		break;
 	    case 's':
-		file_height = file_width = atol(bu_optarg);
+		if (!parse_positive_size_arg(bu_optarg, &file_width, "square size"))
+		    return 0;
+		file_height = file_width;
 		autosize = 0;
 		break;
 	    case 't':
@@ -388,14 +447,17 @@ get_args (int argc, char **argv)
 		tol_using_rgb = 1;
 		break;
 	    case 'w':
-		file_width = atol(bu_optarg);
+		if (!parse_positive_size_arg(bu_optarg, &file_width, "file width"))
+		    return 0;
 		autosize = 0;
 		break;
 	    case 'x':
-		left_edge = atol(bu_optarg);
+		if (!parse_nonnegative_ssize_arg(bu_optarg, &left_edge, "left edge"))
+		    return 0;
 		break;
 	    case 'y':
-		bottom_edge = atol(bu_optarg);
+		if (!parse_nonnegative_ssize_arg(bu_optarg, &bottom_edge, "bottom edge"))
+		    return 0;
 		break;
 	    case 'B':
 		if (! read_hsv(border_hsv, bu_optarg)) {
@@ -428,10 +490,12 @@ get_args (int argc, char **argv)
 		tol_using_rgb = 0;
 		break;
 	    case 'X':
-		right_edge = atoi(bu_optarg);
+		if (!parse_nonnegative_ssize_arg(bu_optarg, &right_edge, "right edge"))
+		    return 0;
 		break;
 	    case 'Y':
-		top_edge = atoi(bu_optarg);
+		if (!parse_nonnegative_ssize_arg(bu_optarg, &top_edge, "top edge"))
+		    return 0;
 		break;
 	    default:  /* 'h' '?' */
 		return 0;
@@ -454,8 +518,10 @@ get_args (int argc, char **argv)
 	++fileinput;
     }
 
-    if (argc > ++bu_optind)
-	(void) fprintf(stderr, "pixborder: excess argument(s) ignored\n");
+    if (argc > ++bu_optind) {
+	(void) fprintf(stderr, "pixborder: excess argument(s) not supported\n");
+	return 0;
+    }
 
     if (left_edge == -1)
 	left_edge = 0;

@@ -47,6 +47,17 @@ mark_as_advanced(BUILD_SHARED_LIBS)
 # Build static libs by default.
 option(BUILD_STATIC_LIBS "Build static libraries" ON)
 
+# Build a monolithic BRL-CAD shared library from the normal library target
+# objects.  This requires USE_OBJECT_LIBS so the aggregate stays tied to the
+# current BRL-CAD library definitions rather than a manually maintained list.
+option(BRLCAD_ENABLE_BRLCAD_LIBRARY "Build aggregate brlcad shared library" OFF)
+mark_as_advanced(BRLCAD_ENABLE_BRLCAD_LIBRARY)
+
+# Link static-library validation executables when the platform supports the
+# linker options needed to force archive member resolution.
+option(BRLCAD_VALIDATE_STATIC_LINKS "Validate static library dependency closure with link tests" ON)
+mark_as_advanced(BRLCAD_VALIDATE_STATIC_LINKS)
+
 # Global third party controls - these options enable and disable ALL bext
 # copies of libraries.
 if(MSVC)
@@ -89,9 +100,8 @@ if(BRLCAD_ENABLE_MINIMAL)
 endif(BRLCAD_ENABLE_MINIMAL)
 
 # Enable Aqua widgets on Mac OSX.  This impacts Tcl/Tk building and OpenGL
-# building. Not currently working - needs work in at least Tk CMake logic
-# (probably more), and the display manager/framebuffer codes are known to
-# depend on either GLX or WGL specifically in their current forms.
+# building.  Historically the display manager/framebuffer codes have depended
+# on either GLX or WGL, although tkswrast can operate without X11.
 option(BRLCAD_ENABLE_AQUA "Use Aqua instead of X11 whenever possible on OSX." OFF)
 mark_as_advanced(BRLCAD_ENABLE_AQUA)
 
@@ -154,28 +164,41 @@ if(NOT BRLCAD_ENABLE_X11 AND NOT BRLCAD_ENABLE_AQUA AND NOT WIN32)
 endif(NOT BRLCAD_ENABLE_X11 AND NOT BRLCAD_ENABLE_AQUA AND NOT WIN32)
 if(BRLCAD_ENABLE_X11)
   set(TK_X11_GRAPHICS ON CACHE STRING "Need X11 Tk" FORCE)
+  set(TCL_TK_SYSTEM_GRAPHICS "x11" CACHE STRING "Tcl/Tk windowing system type" FORCE)
+elseif(BRLCAD_ENABLE_AQUA)
+  set(TK_X11_GRAPHICS OFF CACHE STRING "Need Aqua Tk" FORCE)
+  set(TCL_TK_SYSTEM_GRAPHICS "aqua" CACHE STRING "Tcl/Tk windowing system type" FORCE)
+elseif(WIN32)
+  set(TK_X11_GRAPHICS OFF CACHE STRING "Need Windows Tk" FORCE)
+  set(TCL_TK_SYSTEM_GRAPHICS "win32" CACHE STRING "Tcl/Tk windowing system type" FORCE)
+else()
+  unset(TK_X11_GRAPHICS CACHE)
+  unset(TCL_TK_SYSTEM_GRAPHICS CACHE)
 endif(BRLCAD_ENABLE_X11)
 
-find_package(OpenGL)
+# Do our OpenGL setup
+if(NOT DEFINED BRLCAD_ENABLE_OPENGL OR BRLCAD_ENABLE_OPENGL)
+  find_package_opengl()
+endif()
 set(BRLCAD_ENABLE_OPENGL_DEFAULT OFF)
-if(OPENGL_FOUND)
+if(OPENGL_TARGETS)
   set(BRLCAD_ENABLE_OPENGL_DEFAULT ON)
-endif(OPENGL_FOUND)
+endif(OPENGL_TARGETS)
 brlcad_option(BRLCAD_ENABLE_OPENGL ${BRLCAD_ENABLE_OPENGL_DEFAULT}
   TYPE BOOL
   ALIASES ENABLE_OPENGL
 )
-
-if(BRLCAD_ENABLE_OPENGL)
-  config_h_append(BRLCAD "#define BRLCAD_OPENGL 1\n")
-endif(BRLCAD_ENABLE_OPENGL)
-
-if(BRLCAD_ENABLE_AQUA)
+if(BRLCAD_ENABLE_OPENGL AND NOT OPENGL_TARGETS)
+  message(WARNING "OpenGL requested, but not available for this configuration or system - disabling.\n")
+  set(BRLCAD_ENABLE_OPENGL OFF)
+  set(BRLCAD_ENABLE_OPENGL OFF CACHE BOOL "Disabled due to OpenGL not found/working" FORCE)
+endif()
+if(BRLCAD_ENABLE_AQUA AND OPENGL_TARGETS)
   set(OPENGL_USE_AQUA ON CACHE STRING "Aqua enabled - use Aqua OpenGL" FORCE)
-endif(BRLCAD_ENABLE_AQUA)
+endif()
 
 # Enable features requiring Bullet Physics SDK
-option(BRLCAD_ENABLE_BULLET "Enable features requiring the Bullet Physics Library" OFF)
+option(BRLCAD_ENABLE_BULLET "Enable features requiring the Bullet Physics Library" ON)
 mark_as_advanced(BRLCAD_ENABLE_BULLET)
 
 # Enable features requiring GDAL geospatial library
@@ -284,6 +307,14 @@ brlcad_option(BRLCAD_DEBUGGING ON
   TYPE BOOL
   ALIASES ENABLE_DEBUG ENABLE_FLAGS_DEBUG ENABLE_DEBUG_FLAGS BRLCAD_FLAGS_DEBUG
 )
+
+# Instrument C and C++ code with AddressSanitizer.  The compiler/linker setup
+# is performed after the normal debug and optimization flags are selected.
+brlcad_option(BRLCAD_ENABLE_ADDRESS_SANITIZER OFF
+  TYPE BOOL
+  ALIASES ENABLE_ADDRESS_SANITIZER ENABLE_ASAN BRLCAD_ENABLE_ASAN
+)
+mark_as_advanced(BRLCAD_ENABLE_ADDRESS_SANITIZER)
 
 # A variety of debugging messages in the code key off of the DEBUG definition -
 # set it according to whether we're using debug flags.

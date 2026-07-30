@@ -43,8 +43,13 @@ extern int event_check(struct mged_state *s, int non_blocking);
 void
 mged_update(struct mged_state *s, int non_blocking)
 {
+    if (mged_shutting_down(s))
+	return;
+
     if (non_blocking >= 0)
 	event_check(s, non_blocking);
+    if (mged_shutting_down(s))
+	return;
     refresh(s);
 }
 
@@ -172,7 +177,7 @@ f_wait(ClientData clientData,	/* Main window associated with interpreter. */
 
 	/* Tcl sets 'done' to non-zero */
 	done = 0;
-	while (!done) {
+	while (!done && !mged_shutting_down(s)) {
 	    mged_update(s, 0);
 	}
 
@@ -195,8 +200,13 @@ f_wait(ClientData clientData,	/* Main window associated with interpreter. */
 
 	/* Tcl sets 'done' to non-zero */
 	done = 0;
-	while (!done) {
+	while (!done && !mged_shutting_down(s)) {
 	    mged_update(s, 0);
+	}
+	if (mged_shutting_down(s)) {
+	    Tk_DeleteEventHandler(window, VisibilityChangeMask|StructureNotifyMask,
+			  WaitVisibilityProc, (ClientData) &done);
+	    return TCL_OK;
 	}
 	if (done != 1) {
 	    /*
@@ -228,8 +238,13 @@ f_wait(ClientData clientData,	/* Main window associated with interpreter. */
 
 	/* Tcl sets 'done' to non-zero */
 	done = 0;
-	while (!done) {
+	while (!done && !mged_shutting_down(s)) {
 	    mged_update(s, 0);
+	}
+	if (mged_shutting_down(s)) {
+	    Tk_DeleteEventHandler(window, StructureNotifyMask,
+			  WaitWindowProc, (ClientData) &done);
+	    return TCL_OK;
 	}
 	/*
 	 * Note: there's no need to delete the event handler.  It was

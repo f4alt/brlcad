@@ -84,7 +84,7 @@ clt_arbn_pack(struct bu_pool *pool, struct soltab *stp)
 /**
  * Calculate a bounding RPP for an ARBN
  */
-int
+C_DECL int
 rt_arbn_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct bn_tol *UNUSED(tol)) {
     size_t i, j, k;
     struct rt_arbn_internal *aip;
@@ -139,7 +139,7 @@ rt_arbn_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct
  *  0 OK
  * !0 failure
  */
-int
+C_DECL int
 rt_arbn_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 {
     struct rt_arbn_internal *aip;
@@ -243,7 +243,7 @@ rt_arbn_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 }
 
 
-void
+C_DECL void
 rt_arbn_print(const struct soltab *stp)
 {
     size_t i;
@@ -272,7 +272,7 @@ rt_arbn_print(const struct soltab *stp)
  *  0 MISS
  * >0 HIT
  */
-int
+C_DECL int
 rt_arbn_shot(struct soltab *stp, struct xray *rp, struct application *ap, struct seg *seghead)
 {
     struct rt_arbn_internal *aip =
@@ -341,9 +341,103 @@ rt_arbn_shot(struct soltab *stp, struct xray *rp, struct application *ap, struct
 
 
 /**
+ * Vectorized counterpart to rt_arbn_shot().
+ *
+ * Intersect a batch of n rays, each against its own arbn soltab, writing
+ * exactly one seg per ray into the caller-supplied flat segp[] array.  A
+ * miss is flagged with segp[i].seg_stp == NULL; stp[i] == NULL signals a
+ * ray to skip.
+ *
+ * Unlike the scalar shot, no seg is acquired from the resource free list
+ * and no seg-list linkage is performed: results stream directly into the
+ * contiguous segp[] array.  Eliminating that per-hit allocation and list
+ * traffic is the data-coherency benefit of batching.  The per-ray
+ * arithmetic is a verbatim copy of rt_arbn_shot() so the two paths agree
+ * to the bit; hit_surfno is preserved for rt_arbn_norm().
+ */
+C_DECL void
+rt_arbn_vshot(struct soltab **stp, struct xray **rp, struct seg *segp, int n, struct application *ap)
+/* An array of solid pointers */
+/* An array of ray pointers */
+/* array of segs (results returned) */
+/* Number of ray/object pairs */
+{
+    int j;
+
+    if (ap) RT_CK_APPLICATION(ap);
+
+    for (j = 0; j < n; j++) {
+	struct rt_arbn_internal *aip;
+	int i;
+	int iplane, oplane;
+	fastf_t in, out;	/* ray in/out distances */
+
+	if (stp[j] == 0) continue;		/* skip this ray */
+	segp[j].seg_stp = (struct soltab *)0;	/* assume MISS */
+
+	aip = (struct rt_arbn_internal *)stp[j]->st_specific;
+
+	in = -INFINITY;
+	out = INFINITY;
+	iplane = oplane = -1;
+
+	for (i = aip->neqn-1; i >= 0; i--) {
+	    fastf_t slant_factor;	/* Direction dot Normal */
+	    fastf_t norm_dist;
+	    fastf_t s;
+
+	    norm_dist = VDOT(aip->eqn[i], rp[j]->r_pt) - aip->eqn[i][3];
+	    if ((slant_factor = -VDOT(aip->eqn[i], rp[j]->r_dir)) < -1.0e-10) {
+		/* exit point, when dir.N < 0.  out = min(out, s) */
+		if (out > (s = norm_dist/slant_factor)) {
+		    out = s;
+		    oplane = i;
+		}
+	    } else if (slant_factor > 1.0e-10) {
+		/* entry point, when dir.N > 0.  in = max(in, s) */
+		if (in < (s = norm_dist/slant_factor)) {
+		    in = s;
+		    iplane = i;
+		}
+	    } else {
+		/* ray is parallel to plane when dir.N == 0.
+		 * If it is outside the solid, stop now
+		 * Allow very small amount of slop, to catch
+		 * rays that lie very nearly in the plane of a face.
+		 */
+		if (norm_dist > SQRT_SMALL_FASTF)
+		    goto miss;	/* MISS */
+	    }
+	    if (in > out)
+		goto miss;	/* MISS */
+	}
+
+	/* Validate */
+	if (iplane == -1 || oplane == -1) {
+	    /*bu_log("rt_arbn_shoot(%s): 1 hit => MISS\n", stp[j]->st_name);*/
+	    goto miss;	/* MISS */
+	}
+	if (in >= out || out >= INFINITY)
+	    goto miss;	/* MISS */
+
+	segp[j].seg_stp = stp[j];
+	segp[j].seg_in.hit_dist = in;
+	segp[j].seg_in.hit_surfno = iplane;
+
+	segp[j].seg_out.hit_dist = out;
+	segp[j].seg_out.hit_surfno = oplane;
+	continue;
+
+    miss:
+	segp[j].seg_stp = (struct soltab *)0;	/* MISS */
+    }
+}
+
+
+/**
  * Given ONE ray distance, return the normal and entry/exit point.
  */
-void
+C_DECL void
 rt_arbn_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
 {
     struct rt_arbn_internal *aip =
@@ -366,7 +460,7 @@ rt_arbn_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
  * Pick a principle direction orthogonal to normal, and
  * indicate no curvature.
  */
-void
+C_DECL void
 rt_arbn_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
 {
     struct rt_arbn_internal *arbn = (struct rt_arbn_internal *)stp->st_specific;
@@ -384,7 +478,7 @@ rt_arbn_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
  * u extends along the arb_U direction defined by B-A,
  * v extends along the arb_V direction defined by Nx(B-A).
  */
-void
+C_DECL void
 rt_arbn_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct uvcoord *uvp)
 {
     struct rt_arbn_internal *arbn = (struct rt_arbn_internal *)stp->st_specific;
@@ -400,7 +494,7 @@ rt_arbn_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct 
 }
 
 
-void
+C_DECL void
 rt_arbn_free(struct soltab *stp)
 {
     struct rt_arbn_internal *aip =
@@ -420,7 +514,7 @@ rt_arbn_free(struct soltab *stp)
  * plot without requiring extra bookkeeping.
  * Note that the vectors will be drawn in no special order.
  */
-int
+C_DECL int
 rt_arbn_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_tess_tol *UNUSED(ttol), const struct bn_tol *tol, const struct bview *UNUSED(info))
 {
     struct rt_arbn_internal *aip;
@@ -588,7 +682,7 @@ Sort_edges(struct arbn_edges *edges, size_t *edge_count, const struct rt_arbn_in
  * -1 failure
  *  0 OK.  *r points to nmgregion that holds this tessellation.
  */
-int
+C_DECL int
 rt_arbn_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, const struct bg_tess_tol *UNUSED(ttol), const struct bn_tol *tol)
 {
     struct rt_arbn_internal *aip;
@@ -836,7 +930,7 @@ fail:
  * Convert from "network" doubles to machine specific.
  * Transform
  */
-int
+C_DECL int
 rt_arbn_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     union record *rp;
@@ -909,7 +1003,7 @@ rt_arbn_import4(struct rt_db_internal *ip, const struct bu_external *ep, const f
 }
 
 
-int
+C_DECL int
 rt_arbn_export4(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_arbn_internal *aip;
@@ -963,7 +1057,7 @@ rt_arbn_export4(struct bu_external *ep, const struct rt_db_internal *ip, double 
     return 0;			/* OK */
 }
 
-int
+C_DECL int
 rt_arbn_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !ip || !mat)
@@ -1009,7 +1103,7 @@ rt_arbn_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_inte
  * Convert from "network" doubles to machine specific.
  * Transform
  */
-int
+C_DECL int
 rt_arbn_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     struct rt_arbn_internal *aip;
@@ -1058,7 +1152,7 @@ rt_arbn_import5(struct rt_db_internal *ip, const struct bu_external *ep, const f
 }
 
 
-int
+C_DECL int
 rt_arbn_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_arbn_internal *aip;
@@ -1111,7 +1205,7 @@ rt_arbn_export5(struct bu_external *ep, const struct rt_db_internal *ip, double 
  * First line describes type of solid.
  * Additional lines are indented one tab, and give parameter values.
  */
-int
+C_DECL int
 rt_arbn_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local)
 {
     struct rt_arbn_internal *aip =
@@ -1141,7 +1235,7 @@ rt_arbn_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbos
 /**
  * Free the storage associated with the rt_db_internal version of this solid.
  */
-void
+C_DECL void
 rt_arbn_ifree(struct rt_db_internal *ip)
 {
     struct rt_arbn_internal *aip;
@@ -1167,7 +1261,7 @@ rt_arbn_ifree(struct rt_db_internal *ip)
  *	"P#" - the specified plane number (0 based)
  *	no arguments returns everything
  */
-int
+C_DECL int
 rt_arbn_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *attr)
 {
     struct rt_arbn_internal *arbn=(struct rt_arbn_internal *)intern->idb_ptr;
@@ -1222,7 +1316,7 @@ rt_arbn_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const ch
  *		"P#" - adjust a specific plane (0 based)
  *		"P+" - add a new plane to the list of planes
  */
-int
+C_DECL int
 rt_arbn_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv)
 {
     struct rt_arbn_internal *arbn = NULL;
@@ -1326,10 +1420,11 @@ rt_arbn_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, c
     return BRLCAD_OK;
 }
 
-void
-rt_arbn_make(const struct rt_functab *ftp, struct rt_db_internal *intern)
+C_DECL int
+rt_arbn_make(const struct rt_functab *ftp, struct rt_db_internal *intern, const char* UNUSED(variant), const point_t origin, double scale)
 {
     struct rt_arbn_internal *aip;
+    point_t view_center;
 
     intern->idb_type = ID_ARBN;
     intern->idb_major_type = DB5_MAJORTYPE_BRLCAD;
@@ -1341,12 +1436,34 @@ rt_arbn_make(const struct rt_functab *ftp, struct rt_db_internal *intern)
     intern->idb_ptr = (void *)aip;
 
     aip->magic = RT_ARBN_INTERNAL_MAGIC;
-    aip->neqn = 1;
-    aip->eqn = (plane_t *)bu_calloc(aip->neqn, sizeof(plane_t), "arbn plane");
+    aip->neqn = 8;
+    aip->eqn = (plane_t *)bu_calloc(aip->neqn, sizeof(plane_t), "arbn plane eqns");
+    VSET(aip->eqn[0], 1, 0, 0);
+    aip->eqn[0][W] = 0.5*scale;
+    VSET(aip->eqn[1], -1, 0, 0);
+    aip->eqn[1][W] = 0.5*scale;
+    VSET(aip->eqn[2], 0, 1, 0);
+    aip->eqn[2][W] = 0.5*scale;
+    VSET(aip->eqn[3], 0, -1, 0);
+    aip->eqn[3][W] = 0.5*scale;
+    VSET(aip->eqn[4], 0, 0, 1);
+    aip->eqn[4][W] = 0.5*scale;
+    VSET(aip->eqn[5], 0, 0, -1);
+    aip->eqn[5][W] = 0.5*scale;
+    VSET(aip->eqn[6], 0.57735, 0.57735, 0.57735);
+    aip->eqn[6][W] = 0.5*scale;
+    VSET(aip->eqn[7], -0.57735, -0.57735, -0.57735);
+    aip->eqn[7][W] = 0.5*scale;
+    VSET(view_center, origin[X], origin[Y], origin[Z]);
+    for (size_t i = 0; i < aip->neqn; i++) {
+	aip->eqn[i][W] += VDOT(view_center, aip->eqn[i]);
+    }
+
+    return BRLCAD_OK;
 }
 
 
-int
+C_DECL int
 rt_arbn_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
 {
     struct rt_arbn_internal *aip;
@@ -1399,7 +1516,7 @@ rt_arbn_faces_area(struct poly_face* faces, struct rt_arbn_internal* aip)
 }
 
 
-void
+C_DECL void
 rt_arbn_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 {
     struct bg_tess_tol ttol = BG_TESS_TOL_INIT_ZERO;
@@ -1441,7 +1558,7 @@ rt_arbn_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_arbn_volume(fastf_t *volume, const struct rt_db_internal *ip)
 {
     struct bg_tess_tol ttol = BG_TESS_TOL_INIT_ZERO;
@@ -1485,7 +1602,7 @@ rt_arbn_volume(fastf_t *volume, const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_arbn_centroid(point_t *cent, const struct rt_db_internal *ip)
 {
     struct poly_face *faces;
@@ -1543,7 +1660,7 @@ rt_arbn_centroid(point_t *cent, const struct rt_db_internal *ip)
 }
 
 
-const char *
+C_DECL const char *
 rt_arbn_keypoint(point_t *pt, const char *keystr, const mat_t mat, const struct rt_db_internal *ip, const struct bn_tol *tol)
 {
     if (!pt || !ip)
@@ -1591,7 +1708,7 @@ rt_arbn_keypoint(point_t *pt, const char *keystr, const mat_t mat, const struct 
 }
 
 
-int
+C_DECL int
 rt_arbn_perturb(struct rt_db_internal **oip, const struct rt_db_internal *ip, int UNUSED(planar_only), fastf_t val)
 {
     if (NEAR_ZERO(val, SMALL_FASTF))

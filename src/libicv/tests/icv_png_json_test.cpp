@@ -206,7 +206,7 @@ test_json_chunk_structure(const char *tmpdir)
     ri->aspect      = 1.333;
     ri->perspective = 30.0;
 
-    icv_image_set_render_info(img, ri);
+    CHECK(icv_image_set_render_info(img, ri) == 0, "attached render metadata to JSON struct test image");
 
     struct bu_vls fname = BU_VLS_INIT_ZERO;
     bu_vls_printf(&fname, "%s/json_struct_test.png", tmpdir);
@@ -321,7 +321,7 @@ test_double_precision(const char *tmpdir)
     ri->aspect      = 1.0;
     ri->perspective = 0.0;
 
-    icv_image_set_render_info(img, ri);
+    CHECK(icv_image_set_render_info(img, ri) == 0, "attached render metadata to precision test image");
 
     struct bu_vls fname = BU_VLS_INIT_ZERO;
     bu_vls_printf(&fname, "%s/json_precision_test.png", tmpdir);
@@ -410,7 +410,7 @@ test_single_object(const char *tmpdir)
     ri->viewsize    = 500.0;
     ri->aspect      = 1.0;
     ri->perspective = 0.0;
-    icv_image_set_render_info(img, ri);
+    CHECK(icv_image_set_render_info(img, ri) == 0, "attached render metadata to single object test image");
 
     struct bu_vls fname = BU_VLS_INIT_ZERO;
     bu_vls_printf(&fname, "%s/json_single_obj.png", tmpdir);

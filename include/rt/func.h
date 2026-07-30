@@ -157,9 +157,21 @@ RT_EXPORT extern int rt_obj_adjust(struct bu_vls *logstr, struct rt_db_internal 
 RT_EXPORT extern int rt_obj_describe(struct bu_vls *logstr, const struct rt_db_internal *ip, int verbose, double mm2local);
 
 /**
- * create a 'default' object
+ * Return to @p labels (separated by @p sep, defaulting to space if NULL)
+ * the set of type labels accepted by rt_obj_make(); sorted alphabetically.
+ * Caller's responsibility to free bu_vls.
  */
-RT_EXPORT extern int rt_obj_make(const struct rt_functab *ftp, struct rt_db_internal *ip);
+RT_EXPORT extern void rt_obj_make_labels(struct bu_vls *labels, const char *sep);
+
+/**
+ * create a 'default' object of the type named by @p label, scaled by
+ * @p scale and positioned at @p origin.
+ *
+ * @p label is the user's type word ("sph", "rcc", "arb6", "tor", ...) and
+ * doubles as the variant selector for primitives with geometry aliases.
+ * Returns BRLCAD_OK on success, BRLCAD_ERROR otherwise.
+ */
+RT_EXPORT extern int rt_obj_make(const char *label, const point_t origin, double scale, struct rt_db_internal *ip);
 
 /**
  * apply a matrix transformation to an object (translation, rotation, scale)
@@ -199,13 +211,15 @@ RT_EXPORT extern int rt_obj_prep_serialize(struct soltab *stp, const struct rt_d
  *                     iterations: r_sa = sqrt(SA / (4*pi)) for surface area
  *                     and r_v = cbrt(3*V / (4*pi)) for volume.  Sampling
  *                     stops when both |Δr_sa| and |Δr_v| (for whichever
- *                     outputs are requested) are < stability_mm.
+ *                     outputs are requested) remain < stability_mm for
+ *                     consecutive stable windows.
  *
  *   time_ms > 0       Stop once this many wall-clock milliseconds have
  *                     elapsed, returning the best estimate accumulated so far.
  *
  * When multiple fields are non-zero the first criterion to fire wins,
  * giving callers fine control over the accuracy / speed trade-off.
+ *
  */
 struct rt_crofton_params {
     size_t n_rays;       /**< max total rays; 0 = no limit via this criterion */
@@ -219,11 +233,15 @@ struct rt_crofton_params {
  * raytrace instance.  The caller owns @p rtip and must call rt_free_rti
  * after this function returns.
  *
- * @param rtip          Prepared raytrace instance (rt_prep_parallel must
- *                      have been called first).
- * @param params        Stopping criteria.  NULL or all-zero → 2 000-ray default.
  * @param out_surf_area Receives the estimated surface area (mm^2).
  * @param out_volume    Receives the estimated volume (mm^3).
+ * @param rtip          Prepared raytrace instance (rt_prep_parallel must
+ *                      have been called first).
+ * @param params        Stopping criteria.  NULL or all-zero -> 2 000-ray default.
+ * @param bbox_min      Optional focused sampling bbox minimum.  Pass NULL to
+ *                      derive the sampling sphere from prepared soltab extents.
+ * @param bbox_max      Optional focused sampling bbox maximum.  Pass NULL to
+ *                      derive the sampling sphere from prepared soltab extents.
  * @return  The total number of ray-surface crossings accumulated during
  *          sampling (>= 0) on success; -1 on bad arguments.  A return
  *          value of 0 means no geometry was intersected by the sampler.
@@ -305,7 +323,7 @@ struct rt_crofton_params {
  * (which is insensitive to sliver SA: sliver volume is ~14 mm³ out of
  * 147 200 mm³, or 0.01%) is a far more reliable cross-check metric.
  */
-RT_EXPORT extern int rt_crofton_shoot(struct rt_i *rtip, const struct rt_crofton_params *params, double *out_surf_area, double *out_volume);
+RT_EXPORT extern int rt_crofton_shoot(double *out_surf_area, double *out_volume, struct rt_i *rtip, const struct rt_crofton_params *params, const fastf_t *bbox_min, const fastf_t *bbox_max);
 
 
 /**

@@ -60,10 +60,43 @@ extern "C" {
 
 
 void
+ged_subprocesses_terminate(struct ged *gedp)
+{
+    if (gedp == GED_NULL)
+	return;
+
+    /* Detach application event-loop handlers before freeing their ClientData,
+     * then terminate every subprocess.  Removing from the end avoids skipping
+     * entries as the table shrinks. */
+    while (BU_PTBL_LEN(&gedp->ged_subp)) {
+	size_t i = BU_PTBL_LEN(&gedp->ged_subp) - 1;
+	struct ged_subprocess *rrp = (struct ged_subprocess *)BU_PTBL_GET(&gedp->ged_subp, i);
+	if (gedp->ged_delete_io_handler) {
+	    (*gedp->ged_delete_io_handler)(rrp, BU_PROCESS_STDIN);
+	    (*gedp->ged_delete_io_handler)(rrp, BU_PROCESS_STDOUT);
+	    (*gedp->ged_delete_io_handler)(rrp, BU_PROCESS_STDERR);
+	}
+	if (!rrp->aborted) {
+	    bu_pid_terminate(bu_process_pid(rrp->p));
+	    rrp->aborted = 1;
+	}
+	(void)bu_process_wait_n(&rrp->p, 0);
+	bu_ptbl_rm(&gedp->ged_subp, (long *)rrp);
+	BU_PUT(rrp, struct ged_subprocess);
+    }
+    bu_ptbl_reset(&gedp->ged_subp);
+}
+
+
+void
 ged_close(struct ged *gedp)
 {
     if (gedp == GED_NULL)
 	return;
+
+    /* Children and their callbacks must quiesce before either displayed
+     * resources or the database they reference are dismantled. */
+    ged_subprocesses_terminate(gedp);
 
     if (gedp->dbip) {
 	db_close(gedp->dbip);
@@ -72,20 +105,6 @@ ged_close(struct ged *gedp)
 
     if (gedp->ged_lod)
 	bv_mesh_lod_context_destroy(gedp->ged_lod);
-
-    /* Terminate any ged subprocesses */
-    if (gedp != GED_NULL) {
-	for (size_t i = 0; i < BU_PTBL_LEN(&gedp->ged_subp); i++) {
-	    struct ged_subprocess *rrp = (struct ged_subprocess *)BU_PTBL_GET(&gedp->ged_subp, i);
-	    if (!rrp->aborted) {
-		bu_pid_terminate(bu_process_pid(rrp->p));
-		rrp->aborted = 1;
-	    }
-	    bu_ptbl_rm(&gedp->ged_subp, (long *)rrp);
-	    BU_PUT(rrp, struct ged_subprocess);
-	}
-	bu_ptbl_reset(&gedp->ged_subp);
-    }
 
     ged_destroy(gedp);
     gedp = NULL;
@@ -398,6 +417,7 @@ ged_clbk_exec(struct bu_vls *log, struct ged *gedp, int limit, bu_clbk_t f, int 
     Ged_Internal *gedip = gedp->i->i;
     int rlimit = (limit > 0) ? limit : 1;
 
+    // check depth count before we run clbk
     gedip->clbk_recursion_depth_cnt[f]++;
 
     if (gedip->clbk_recursion_depth_cnt[f] > rlimit) {
@@ -418,7 +438,8 @@ ged_clbk_exec(struct bu_vls *log, struct ged *gedp, int limit, bu_clbk_t f, int 
     // Checks complete - actually run the callback
     int ret = (*f)(ac, av, u1, u2);
 
-    gedip->clbk_recursion_depth_cnt[f]++;
+    // clbk has returned, pop the depth count
+    gedip->clbk_recursion_depth_cnt[f]--;
 
     return ret;
 }
@@ -584,4 +605,3 @@ ged_dm_ctx_get(struct ged *gedp, const char *dm_type)
 // c-file-style: "stroustrup"
 // End:
 // ex: shiftwidth=4 tabstop=8
-

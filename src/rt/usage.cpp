@@ -136,7 +136,7 @@ default_options(void)
     option("Advanced", "-U #", "Turn on air region rendering (default: 0 - off)", 1);
     option("Advanced", "-V #", "View (pixel) aspect ratio (width/height)", 1);
     option("Advanced", "-j xmin,xmax,ymin,ymax", "Only render pixels within the specified sub-rectangle", 1);
-    option("Advanced", "-k xdir,ydir,zdir,dist", "Specify a cutting plane for the entire render scene", 1);
+    option("Advanced", "-k xdir,ydir,zdir,dist | x,y,z,nx,ny,nz | x,y,z", "Specify a cutting plane for the entire render scene", 1);
 
     option("Developer", "-v [#]", "Specify or increase RT verbosity", 1);
     option("Developer", "-X #", "Specify RT debugging flags", 1);
@@ -162,7 +162,7 @@ default_options(void)
 void
 usage(const char *argv0, int verbose)
 {
-    bu_log("\nUsage:  %s [options] model.g objects...\n", argv0);
+    bu_log("\nUsage:  %s [options] model.g [objects...]\n", argv0);
 
     /* use defaults if none were loaded */
     if (!map_initialized) {
@@ -243,7 +243,7 @@ usage(const char *argv0, int verbose)
 	}
     }
     if (verbose < max_verbosity) {
-	bu_log("\nType \"%s -?\" for a complete list of options.\n", argv0);
+	bu_log("\nType \"%s -?\" for a complete list of options.  See rt(1) man page for long options.\n", argv0);
     }
     bu_log("\n");
 }
@@ -258,4 +258,3 @@ usage(const char *argv0, int verbose)
 // c-file-style: "stroustrup"
 // End:
 // ex: shiftwidth=4 tabstop=8
-

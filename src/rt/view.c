@@ -56,23 +56,15 @@
 #include "bu/cv.h"
 #include "dm.h"
 #include "bv/plot3.h"
-#include "photonmap.h"
+#include "optical/photonmap.h"
 #include "scanline.h"
 
 #include "./rtuif.h"
 #include "./ext.h"
 
 
-extern struct fb *fbp;			/* Framebuffer handle */
-
-extern int curframe;		/* from main.c */
-extern double airdensity;	/* from opt.c */
-extern double haze[3];		/* from opt.c */
-extern int do_kut_plane;        /* from opt.c */
-extern plane_t kut_plane;       /* from opt.c */
-extern struct icv_image *bif;
-extern struct floatpixel *curr_float_frame;	/* buffer of full frame */
-extern fastf_t** timeTable_init(int x, int y);  /* from heatgraph.c */
+extern fastf_t** timeTable_init(size_t x, size_t y);  /* from heatgraph.c */
+extern void timeTable_clear(size_t x, size_t y);  /* from heatgraph.c */
 extern void timeTable_process(fastf_t **timeTable, struct application *UNUSED(app), struct fb *efbp); /* from heatgraph.c */
 extern void free_scanlines(int, struct scanline *);
 extern struct scanline* alloc_scanlines(int);
@@ -82,8 +74,7 @@ extern int srv_startpix;	/* offset for view_pixel */
 extern int srv_scanlen;		/* BUFMODE_RTSRV buffer length */
 #endif
 
-
-const char title[] = "The BRL-CAD Raytracer RT";
+EXTERNCPP const char title[] = "The BRL-CAD Raytracer RT";
 
 static struct scanline* scanline = NULL;
 static fastf_t* psum_buffer;            /* Buffer that keeps partial sums for multi-samples modes */
@@ -241,12 +232,18 @@ view_pixel(struct application *ap)
 	    b = inonbackground[2];
 	}
 
-	/* Make sure it's never perfect black */
-	if (r==0 && g==0 && b==0 && benchmark==0)
+	/* Make sure it's never perfect black, even in benchmark mode.
+	 * A genuine hit that renders to (0,0,0) is indistinguishable
+	 * from a background miss for any compositing that works with
+	 * pixel values.  The reference image bench/ref/m35.pix was
+	 * generated with this guard always active.  Benchmark mode
+	 * removes random effects (dither) but must not change semantic
+	 * hit-vs-miss distinguishability. */
+	if (r==0 && g==0 && b==0)
 	    b = 1;
     }
 
-    if (OPTICAL_DEBUG&OPTICAL_DEBUG_HITS) bu_log("rgb=%3d, %3d, %3d xy=%3d, %3d (%g, %g, %g)\n",
+    if (OPTICAL_DEBUG&OPTICAL_DEBUG_HITS)bu_log("rgb=%3d, %3d, %3d xy=%3d, %3d (%g, %g, %g)\n",
 						 r, g, b, ap->a_x, ap->a_y,
 						 V3ARGS(ap->a_color));
 
@@ -1398,11 +1395,6 @@ reproject_splat(int ix, int iy, struct floatpixel *ip, const fastf_t *new_view_p
 
 
 /* Local communication a.la. worker() */
-extern int per_processor_chunk;	/* how many pixels to do at once */
-extern int cur_pixel;		/* current pixel number, 0..last_pixel */
-extern int last_pixel;		/* last pixel number */
-extern int pix_start;		/* starting pixel of frame, from do.c */
-
 void
 reproject_worker(int UNUSED(cpu), void *UNUSED(arg))
 {
@@ -1531,6 +1523,9 @@ view_2init(struct application *ap, char *UNUSED(framename))
 
     pwidth = 3;
 
+    if (lightmodel == 8)
+	timeTable_clear(width, height);
+
     /* Always allocate the scanline[] array (unless we already have
      * one in incremental mode)
      */
@@ -1622,6 +1617,10 @@ view_2init(struct application *ap, char *UNUSED(framename))
 	    break;
 #ifdef RTSRV
 	case BUFMODE_RTSRV:
+	    if (scanbuf) {
+		bu_free(scanbuf, "scanbuf [multi-line]");
+		scanbuf = NULL;
+	    }
 	    scanbuf = (unsigned char *)bu_malloc(srv_scanlen*pwidth + sizeof(long), "scanbuf [multi-line]");
 	    break;
 #endif
@@ -1845,7 +1844,7 @@ view_2init(struct application *ap, char *UNUSED(framename))
  * Called once, very early on in RT setup, even before command line is
  * processed.
  */
-void
+C_DECL void
 application_init(void)
 {
     /* Set the byte offsets at run time */

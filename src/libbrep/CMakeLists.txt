@@ -20,6 +20,7 @@ set(
   debug_plot.cpp
   edit.cpp
   intersect.cpp
+  quality.cpp
   tools/tools.cpp
   opennurbs_ext.cpp
   px_event.cpp
@@ -37,24 +38,40 @@ set(
 # Include directories needed by libbrep users
 set(BREP_INCLUDE_DIRS ${OPENNURBS_INCLUDE_DIRS})
 
+# GTE headers (in-tree custom extensions + external base) are needed by
+# cdt/mesh.cpp for the LSCM patch parameterization path.
+find_package_gte(REQUIRED)
+
 # locally used but not needed by users of the library
-set(BREP_LOCAL_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} ${REGEX_INCLUDE_DIRS})
+set(BREP_LOCAL_INCLUDE_DIRS
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${REGEX_INCLUDE_DIRS}
+  ${BRLCAD_SOURCE_DIR}/src/libbg/GTE
+  ${GTE_INCLUDE_DIR})
 
 # Note - libbrep_deps is defined by ${BRLCAD_SOURCE_DIR}/src/source_dirs.cmake
+set(BREP_PUBLIC_LIBS ${libbrep_deps} OPENNURBS::OPENNURBS)
 set(
-  BREP_LIBS
-  ${libbrep_deps}
-  ${OPENNURBS_LIBRARIES}
+  BREP_PRIVATE_LIBS
   ${WINSOCK_LIB}
   ${RPCRT_LIB}
   ${STDCXX_LIBRARIES}
 )
 
-brlcad_addlib(libbrep "${LIBBREP_SOURCES}" "${BREP_LIBS}" "${BREP_INCLUDE_DIRS}" "${BREP_LOCAL_INCLUDE_DIRS}")
+brlcad_addlib(libbrep "${LIBBREP_SOURCES}" "${BREP_INCLUDE_DIRS}" "${BREP_LOCAL_INCLUDE_DIRS}"
+  PUBLIC_LIBS ${BREP_PUBLIC_LIBS}
+  PRIVATE_LIBS ${BREP_PRIVATE_LIBS}
+)
 set_target_properties(libbrep PROPERTIES VERSION 20.0.1 SOVERSION 20)
 
 if(HIDE_INTERNAL_SYMBOLS)
   set_property(TARGET libbrep APPEND PROPERTY COMPILE_DEFINITIONS "OPENNURBS_IMPORTS")
+  if(TARGET libbrep-obj)
+    set_property(TARGET libbrep-obj APPEND PROPERTY COMPILE_DEFINITIONS "OPENNURBS_IMPORTS")
+  endif(TARGET libbrep-obj)
+  if(TARGET libbrep-brlcad-obj)
+    set_property(TARGET libbrep-brlcad-obj APPEND PROPERTY COMPILE_DEFINITIONS "OPENNURBS_IMPORTS")
+  endif(TARGET libbrep-brlcad-obj)
   # Anyone who needs to import libbrep will also need to import openNURBS
   set_property(TARGET libbrep APPEND PROPERTY INTERFACE_COMPILE_DEFINITIONS "OPENNURBS_IMPORTS")
 endif(HIDE_INTERNAL_SYMBOLS)
@@ -69,6 +86,7 @@ cmakefiles(
   cdt/cdt.h
   cdt/mesh.h
   debug_plot.h
+  quality.cpp
   shape_recognition/shape_recognition.h
   shape_recognition/torus.cpp
   tools/tools.h

@@ -43,7 +43,7 @@
 #define ECMD_EXTR_ROT_A		27079	/* rotate A reference vector */
 #define ECMD_EXTR_ROT_B		27080	/* rotate B reference vector */
 
-void
+C_DECL void
 rt_edit_extrude_set_edit_mode(struct rt_edit *s, int mode)
 {
     rt_edit_set_edflag(s, mode);
@@ -88,13 +88,69 @@ struct rt_edit_menu_item extr_menu[] = {
     { "", NULL, 0 }
 };
 
-struct rt_edit_menu_item *
+C_DECL struct rt_edit_menu_item *
 rt_edit_extrude_menu_item(const struct bn_tol *UNUSED(tol))
 {
     return extr_menu;
 }
 
-const char *
+/* ------------------------------------------------------------------ */
+/* ft_edit_desc descriptor for the Extrusion primitive                */
+/* ------------------------------------------------------------------ */
+
+static const struct rt_edit_param_desc extr_h_params[] = {
+    { "h", "Height (magnitude)", RT_EDIT_PARAM_SCALAR, 0, 1e-10, RT_EDIT_PARAM_NO_LIMIT,
+      "length", 0, NULL, NULL, NULL }
+};
+static const struct rt_edit_param_desc extr_endpoint_params[] = {
+    { "endpoint", "New Endpoint (X Y Z)", RT_EDIT_PARAM_POINT, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT,
+      "length", 0, NULL, NULL, NULL }
+};
+static const struct rt_edit_param_desc extr_rot_deg_params[] = {
+    { "rot_xyz", "Rotation X Y Z (deg)", RT_EDIT_PARAM_VECTOR, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT,
+      "degrees", 0, NULL, NULL, NULL }
+};
+static const struct rt_edit_param_desc extr_a_params[] = {
+    { "a", "A (u_vec) magnitude", RT_EDIT_PARAM_SCALAR, 0, 1e-10, RT_EDIT_PARAM_NO_LIMIT,
+      "length", 0, NULL, NULL, NULL }
+};
+static const struct rt_edit_param_desc extr_b_params[] = {
+    { "b", "B (v_vec) magnitude", RT_EDIT_PARAM_SCALAR, 0, 1e-10, RT_EDIT_PARAM_NO_LIMIT,
+      "length", 0, NULL, NULL, NULL }
+};
+static const struct rt_edit_param_desc extr_skt_name_params[] = {
+    { "sketch", "Referenced Sketch Name", RT_EDIT_PARAM_STRING, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT,
+      "", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_cmd_desc extr_cmds[] = {
+    { ECMD_EXTR_SCALE_H, "Set H",              "geometry", 1, extr_h_params,        1, 10, NULL },
+    { ECMD_EXTR_MOV_H,   "Move End H",         "move",     1, extr_endpoint_params, 1, 20, NULL },
+    { ECMD_EXTR_ROT_H,   "Rotate H",           "rotation", 1, extr_rot_deg_params,  1, 30, NULL },
+    { ECMD_EXTR_SCALE_A, "Set A",              "geometry", 1, extr_a_params,        1, 40, NULL },
+    { ECMD_EXTR_ROT_A,   "Rotate A",           "rotation", 1, extr_rot_deg_params,  1, 50, NULL },
+    { ECMD_EXTR_SCALE_B, "Set B",              "geometry", 1, extr_b_params,        1, 60, NULL },
+    { ECMD_EXTR_ROT_B,   "Rotate B",           "rotation", 1, extr_rot_deg_params,  1, 70, NULL },
+    { ECMD_EXTR_SKT_NAME, "Referenced Sketch", "reference",1, extr_skt_name_params, 1, 80, NULL },
+};
+
+static const struct rt_edit_prim_desc extr_prim_desc = {
+    "extrude", "Extrusion", 8, extr_cmds,
+    0,                    /* nopt         */
+    NULL                  /* opts         */
+};
+
+C_DECL const struct rt_edit_prim_desc *
+rt_edit_extrude_edit_desc(void)
+{
+    return &extr_prim_desc;
+}
+
+
+C_DECL const char *
 rt_edit_extrude_keypoint(
 	point_t *pt,
 	const char *UNUSED(keystr),
@@ -115,7 +171,7 @@ rt_edit_extrude_keypoint(
     return strp;
 }
 
-void
+C_DECL void
 rt_edit_extrude_e_axes_pos(
 	struct rt_edit *s,
 	const struct rt_db_internal *ip,
@@ -510,7 +566,7 @@ ecmd_extr_rot_b(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_extrude_edit(struct rt_edit *s)
 {
     switch (s->edit_flag) {
@@ -549,7 +605,7 @@ rt_edit_extrude_edit(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_extrude_edit_xy(
 	struct rt_edit *s,
 	const vect_t mousevec

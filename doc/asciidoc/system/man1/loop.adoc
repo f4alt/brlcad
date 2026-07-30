@@ -4,80 +4,108 @@
 :manmanual: BRL-CAD
 
 == NAME
-loop - generate numerical indices for shell loops, etc.
+
+loop - generate numeric or character sequences for shell loops
 
 == SYNOPSIS
 
 [source]
 ----
-loop [-c] start finish [increment]
+loop [-c] start finish [incr]
 ----
 
 
 [[description]]
 == DESCRIPTION
 
-*loop* generates a sequence of numbers between _start_ and _finish_ inclusive, one per line, on stdout. This is mostly useful for driving loops when writing Shell programs *sh*(1). The default increment is +1 when _start_<_finish_, and -1 when _start_>_finish_. An optional _increment_ may be specified. If _increment_ is zero, then the _start_ value will be generated continuously.
+*loop* outputs a sequence of values between _start_ and _finish_
+(inclusive), one value per line on standard output.  It is intended for
+driving counted loops in shell scripts.
 
-Both floating point and integer arguments can be used. On integer arguments, if leading zeros are specified, they will be preserved on output. This is useful for generating sequences of file names which are numbered with leading zeros.
+The values are integers, real numbers, or characters.  By default
+*loop* prints integers; if any of _start_, _finish_, or _incr_ contains
+a decimal point or otherwise parses only as a floating-point number, the
+sequence is generated and printed as real numbers (using *%g*
+formatting).  The *-c* option selects character sequences instead.
 
-*-c* is used for character (char) looping.
+The default _incr_ is `1` when _start_ is less than _finish_ and `-1`
+when _start_ is greater than _finish_, so the sequence always runs
+toward _finish_.  An _incr_ of zero is an error.  No attempt is made to
+detect or prevent infinite loops.
 
+For integer sequences, *loop* preserves zero padding: if _start_,
+_finish_, or _incr_ is written with leading zeros, the output is
+left-padded with zeros to the width of the widest such argument (for
+example, `008` through `010`).
+
+[[options]]
+== OPTIONS
+
+*-c*::
+  Generate a character sequence.  _start_ and _finish_ are taken as
+  single characters and the output steps through the character codes
+  between them.  An optional _incr_ may be supplied but must be an
+  integer.
 
 [[examples]]
 == EXAMPLES
 
+.Count from 10 to 30 in steps of 5
+====
+[source,bash]
+----
+loop 10 30 5
+----
+Prints `10`, `15`, `20`, `25`, `30` on successive lines.
+====
 
-....
-
-for i in `loop 10 30 5`
-do
-  echo $i
+.Drive a render loop over zero-padded frame numbers
+====
+[source,bash]
+----
+for frame in $(loop 001 100) ; do
+    rt -o frame${frame}.pix -F /dev/null model.g component
 done
-....
+----
+Renders 100 frames, naming the outputs `frame001.pix` through
+`frame100.pix`.  Because the bounds are written with leading zeros,
+*loop* zero-pads every value to three digits so the file names sort
+correctly.
+====
 
-will display the values 10, 15, 20, 25, 30 .
+.Generate a descending real-number ramp
+====
+[source,bash]
+----
+loop 1.6 0.1 -0.5
+----
+Prints `1.6`, `1.1`, `0.6`, `0.1`; the decimal point selects
+floating-point mode and the negative _incr_ steps downward.
+====
 
+.Step through an alphabetical range
+====
+[source,bash]
+----
+loop -c a e
+----
+Prints the characters `a` through `e`, one per line.
+====
 
-....
+[[see_also]]
+== SEE ALSO
 
-for i in `loop 008 005`
-do
-  echo $i
-done
-....
-
-will display the values 008, 007, 006, 005 .
-
-
-....
-
-for i in `loop 0.1 2.9 0.5`
-do
-  echo $i
-done
-....
-
-will display the values 0.1, 0.6, 1.1, 1.6, 2.1, 2.6 .
-
-
-[[bugs]]
-== BUGS
-
-This program just scratches the surface. The shells could benefit from a greater ability to perform math. Limitless opportunities for extensions exist, but this simple version is adequate for most shell scripts dealing with sequences of images, etc.
-
+*brlcad*(1), *rt*(1), *gencolor*(1)
 
 [[author]]
 == AUTHOR
 
 BRL-CAD Team
 
-
 [[copyright]]
 == COPYRIGHT
 
-This software is Copyright (c) 1986-2026 by the United States Government as represented by U.S. Army Research Laboratory.
-
+This software is Copyright (c) 1989-2026 by the United States Government as represented by U.S. Army Research Laboratory.
 
 [[bug_reports]]
 == BUG REPORTS

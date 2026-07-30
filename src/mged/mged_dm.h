@@ -26,14 +26,18 @@
 #ifndef MGED_MGED_DM_H
 #define MGED_MGED_DM_H
 
+
 #include "common.h"
 
 #include "dm.h"	/* struct dm */
 
 #include "pkg.h" /* struct pkg_conn */
 #include "ged.h"
+#include "menu.h"
 
 #include "mged.h"
+
+__BEGIN_DECLS
 
 struct scroll_item {
     char *scroll_string;
@@ -106,6 +110,8 @@ struct client {
     Tcl_Channel         c_chan;
     Tcl_FileProc        *c_handler;
     struct pkg_conn	*c_pkg;
+    int			c_auth_ok;         /**< @brief !0 if client sent a valid MSG_FBAUTH */
+    int			c_pending_drop;    /**< @brief !0 = drop after pkg_process() returns */
 };
 
 
@@ -339,7 +345,7 @@ struct _menu_state {
     int	ms_top;
     int	ms_cur_menu;
     int	ms_cur_item;
-    struct menu_item	*ms_menus[NMENU];    /* base of menu items array */
+    struct rt_edit_menu_item	*ms_menus[NMENU];    /* base of menu items array */
 };
 
 
@@ -349,6 +355,8 @@ struct mged_dm {
     int			dm_netfd;			/* socket used to listen for connections */
     Tcl_Channel		dm_netchan;
     struct client	dm_clients[MAX_CLIENTS];
+    char		dm_session_token[65];		/* fbserv auth token (64 hex + NUL); empty = no auth */
+    int			dm_require_auth;		/* !0 = reject unauthenticated fb clients */
     int			dm_dirty;			/* true if received an expose or configuration event */
     int			dm_mapped;
     int			dm_owner;			/* true if owner of the view info */
@@ -412,7 +420,7 @@ __END_DECLS
 #define fbp s->mged_curr_dm->dm_fbp
 #define clients s->mged_curr_dm->dm_clients
 #define mapped s->mged_curr_dm->dm_mapped
-#define owner s->mged_curr_dm->dm_owner
+#define mged_dm_owner s->mged_curr_dm->dm_owner
 #define am_mode s->mged_curr_dm->dm_am_mode
 #define perspective_angle s->mged_curr_dm->dm_perspective_angle
 #define zclip_ptr s->mged_curr_dm->dm_zclip_ptr
@@ -516,6 +524,7 @@ __END_DECLS
     \
 }
 
+/* Ew.  Globals. */
 extern double frametime;		/* defined in mged.c */
 extern int dm_pipe[];			/* defined in mged.c */
 extern int update_views;		/* defined in mged.c */
@@ -534,6 +543,7 @@ extern void dm_var_init(struct mged_state *s, struct mged_dm *target_dm);
 
 /* defined in dm-generic.c */
 extern int common_dm(struct mged_state *s, int argc, const char *argv[]);
+extern int mged_dm_motion(struct mged_state *s, int x, int y);
 extern void view_state_flag_hook(const struct bu_structparse *, const char *, void *,const char *, void *);
 extern void dirty_hook(const struct bu_structparse *, const char *, void *,const char *, void *);
 extern void zclip_hook(const struct bu_structparse *, const char *, void *,const char *, void *);
@@ -557,6 +567,7 @@ extern void *set_hook_data(struct mged_state *s, struct mged_view_hook_state *hs
 
 int dm_commands(int argc, const char *argv[], void *data);
 
+__END_DECLS
 
 #endif /* MGED_MGED_DM_H */
 

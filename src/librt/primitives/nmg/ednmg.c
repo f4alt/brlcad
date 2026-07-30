@@ -84,7 +84,7 @@
  */
 #define ECMD_NMG_LEXTRU_DIR	11032
 
-void *
+C_DECL void *
 rt_edit_nmg_prim_edit_create(struct rt_edit *UNUSED(s))
 {
     struct rt_nmg_edit *e;
@@ -99,7 +99,7 @@ rt_edit_nmg_prim_edit_create(struct rt_edit *UNUSED(s))
     return (void *)e;
 }
 
-void
+C_DECL void
 rt_edit_nmg_prim_edit_destroy(struct rt_nmg_edit *e)
 {
     if (!e)
@@ -116,7 +116,7 @@ rt_edit_nmg_prim_edit_destroy(struct rt_nmg_edit *e)
     BU_PUT(e, struct rt_nmg_edit);
 }
 
-void
+C_DECL void
 rt_edit_nmg_prim_edit_reset(struct rt_edit *s)
 {
     struct rt_nmg_edit *n = (struct rt_nmg_edit *)s->ipe_ptr;
@@ -127,12 +127,14 @@ rt_edit_nmg_prim_edit_reset(struct rt_edit *s)
 }
 
 
-void
+C_DECL void
 rt_edit_nmg_set_edit_mode(struct rt_edit *s, int mode)
 {
     struct rt_nmg_edit *n = (struct rt_nmg_edit *)s->ipe_ptr;
     bu_clbk_t f = NULL;
     void *d = NULL;
+    int vs_flag;
+    struct bu_vls tmp_vls = BU_VLS_INIT_ZERO;
 
     rt_edit_set_edflag(s, mode);
 
@@ -171,7 +173,7 @@ rt_edit_nmg_set_edit_mode(struct rt_edit *s, int mode)
 	    if (*n->es_eu->up.magic_p == NMG_LOOPUSE_MAGIC)
 		nmg_veu(&n->es_eu->up.lu_p->down_hd, n->es_eu->up.magic_p);
 	    /* no change of state or edit_flag */
-	    int vs_flag = 1;
+	    vs_flag = 1;
 	    f = NULL; d = NULL;
 	    rt_edit_map_clbk_get(&f, &d, s->m, ECMD_VIEW_SET_FLAG, BU_CLBK_DURING);
 	    if (f)
@@ -186,8 +188,6 @@ rt_edit_nmg_set_edit_mode(struct rt_edit *s, int mode)
 	    n->es_eu = BU_LIST_PNEXT_CIRC(edgeuse, n->es_eu);
 
 	    {
-		struct bu_vls tmp_vls = BU_VLS_INIT_ZERO;
-
 		bu_vls_printf(&tmp_vls, "edgeuse selected = %p (%g %g %g) <-> (%g %g %g)\n",
 			      (void *)n->es_eu, V3ARGS(n->es_eu->vu_p->v_p->vg_p->coord),
 			      V3ARGS(n->es_eu->eumate_p->vu_p->v_p->vg_p->coord));
@@ -208,8 +208,6 @@ rt_edit_nmg_set_edit_mode(struct rt_edit *s, int mode)
 	    n->es_eu = BU_LIST_PPREV_CIRC(edgeuse, n->es_eu);
 
 	    {
-		struct bu_vls tmp_vls = BU_VLS_INIT_ZERO;
-
 		bu_vls_printf(&tmp_vls, "edgeuse selected = %p (%g %g %g) <-> (%g %g %g)\n",
 			      (void *)n->es_eu, V3ARGS(n->es_eu->vu_p->v_p->vg_p->coord),
 			      V3ARGS(n->es_eu->eumate_p->vu_p->v_p->vg_p->coord));
@@ -229,8 +227,6 @@ rt_edit_nmg_set_edit_mode(struct rt_edit *s, int mode)
 	    n->es_eu = n->es_eu->eumate_p->radial_p;
 
 	    {
-		struct bu_vls tmp_vls = BU_VLS_INIT_ZERO;
-
 		bu_vls_printf(&tmp_vls, "edgeuse selected = %p (%g %g %g) <-> (%g %g %g)\n",
 			      (void *)n->es_eu, V3ARGS(n->es_eu->vu_p->v_p->vg_p->coord),
 			      V3ARGS(n->es_eu->eumate_p->vu_p->v_p->vg_p->coord));
@@ -333,8 +329,6 @@ rt_edit_nmg_set_edit_mode(struct rt_edit *s, int mode)
 			if ((ret_val = bg_isect_lseg3_lseg3(dist, v1->vg_p->coord, edge1,
 							    v2->vg_p->coord, edge2, s->tol)) > (-1))
 			{
-			    struct bu_vls tmp_vls = BU_VLS_INIT_ZERO;
-
 			    bu_vls_printf(&tmp_vls,
 					  "Loop crosses itself, cannot extrude\n");
 			    bu_vls_printf(&tmp_vls,
@@ -433,14 +427,65 @@ struct rt_edit_menu_item nmg_menu[] = {
     { "", NULL, 0 }
 };
 
-struct rt_edit_menu_item *
+static const struct rt_edit_param_desc nmg_index_param[] = {
+    { "index", "Index", RT_EDIT_PARAM_INTEGER, 0,
+      0.0, RT_EDIT_PARAM_NO_LIMIT, "count", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc nmg_point_param[] = {
+    { "point", "Point", RT_EDIT_PARAM_POINT, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "length", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc nmg_extrude_param[] = {
+    { "distance", "Distance", RT_EDIT_PARAM_SCALAR, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "length", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc nmg_extrude_dir_param[] = {
+    { "direction", "Direction", RT_EDIT_PARAM_VECTOR, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "none", 0, NULL, NULL, NULL },
+    { "distance", "Distance", RT_EDIT_PARAM_SCALAR, 3,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "length", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_cmd_desc nmg_cmds[] = {
+    { ECMD_NMG_EPICK,      "Pick Edge",                "selection", 1, nmg_index_param,       1, 10, NULL },
+    { ECMD_NMG_EMOVE,      "Move Edge",                "movement",  1, nmg_point_param,       1, 20, NULL },
+    { ECMD_NMG_ESPLIT,     "Split Edge",               "topology",  0, NULL,                  0, 30, NULL },
+    { ECMD_NMG_EKILL,      "Delete Edge",              "topology",  0, NULL,                  0, 40, NULL },
+    { ECMD_NMG_FORW,       "Next EU",                  "selection", 0, NULL,                  0, 50, NULL },
+    { ECMD_NMG_BACK,       "Prev EU",                  "selection", 0, NULL,                  0, 60, NULL },
+    { ECMD_NMG_RADIAL,     "Radial EU",                "selection", 0, NULL,                  0, 70, NULL },
+    { ECMD_NMG_LEXTRU,     "Extrude Loop",             "topology",  1, nmg_extrude_param,     1, 80, NULL },
+    { ECMD_NMG_LEXTRU_DIR, "Extrude Loop (dir+dist)",  "topology",  2, nmg_extrude_dir_param, 1, 90, NULL },
+    { ECMD_NMG_EDEBUG,     "Debug Edge",               "debug",     0, NULL,                  0, 100, NULL },
+    { ECMD_NMG_VPICK,      "Pick Vertex",              "selection", 1, nmg_index_param,       1, 110, NULL },
+    { ECMD_NMG_VMOVE,      "Move Vertex",              "movement",  1, nmg_point_param,       1, 120, NULL },
+    { ECMD_NMG_FPICK,      "Pick Face",                "selection", 1, nmg_index_param,       1, 130, NULL },
+    { ECMD_NMG_FMOVE,      "Move Face",                "movement",  1, nmg_point_param,       1, 140, NULL }
+};
+
+static const struct rt_edit_prim_desc nmg_prim_desc = {
+    "nmg", "NMG", 14, nmg_cmds,
+    0,                    /* nopt         */
+    NULL                  /* opts         */
+};
+
+C_DECL const struct rt_edit_prim_desc *
+rt_edit_nmg_edit_desc(void)
+{
+    return &nmg_prim_desc;
+}
+
+C_DECL struct rt_edit_menu_item *
 rt_edit_nmg_menu_item(const struct bn_tol *UNUSED(tol))
 {
     return nmg_menu;
 }
 
 
-const char *
+C_DECL const char *
 rt_edit_nmg_keypoint(
 	point_t *pt,
 	const char *UNUSED(keystr),
@@ -577,7 +622,7 @@ nmg_keypoint_finalize:
 }
 
 
-void
+C_DECL void
 rt_edit_nmg_labels(
 	int *UNUSED(num_lines),
 	point_t *UNUSED(lines),
@@ -1252,7 +1297,7 @@ ecmd_nmg_fmove(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_nmg_edit(struct rt_edit *s)
 {
     struct rt_nmg_edit *n = (struct rt_nmg_edit *)s->ipe_ptr;
@@ -1306,7 +1351,7 @@ rt_edit_nmg_edit(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_nmg_edit_xy(
 	struct rt_edit *s,
 	const vect_t mousevec

@@ -35,10 +35,11 @@
 
 #include "../../dbi.h"
 
-#define ADIFF_THRES 20
+#define ADIFF_THRES 0.99
 
 extern "C" void ged_changed_callback(struct db_i *UNUSED(dbip), struct directory *dp, int mode, void *u_data);
-extern "C" int img_cmp(int id, struct ged *gedp, const char *cdir, bool clear_scene, bool clear_image, int soft_fail, int approximate_check, const char *clear_root, const char *img_root);
+extern "C" int img_cmp(int id, struct ged *gedp, const char *cdir, bool clear_scene, bool clear_image, int soft_fail, fastf_t approximate_check, const char *clear_root, const char *img_root);
+extern "C" int unpack_apng(const char *src_dir, const char *apng_name, const char *out_dir, const char *prefix);
 
 int
 main(int ac, char *av[]) {
@@ -83,9 +84,16 @@ main(int ac, char *av[]) {
 
     /* We want a local working dir cache */
     char lcache[MAXPATHLEN] = {0};
-    bu_dir(lcache, MAXPATHLEN, BU_DIR_CURR, "ged_draw_test_select_cache", NULL);
+    char runtime_cache[MAXPATHLEN] = {0};
+    bu_dir(lcache, MAXPATHLEN, BU_DIR_CURR, "ged_select_test_cache", NULL);
     bu_mkdir(lcache);
-    bu_setenv("BU_DIR_CACHE", lcache, 1);
+    bu_dir(runtime_cache, MAXPATHLEN, BU_DIR_CURR, "ged_select_test_cache",
+	   "cache", NULL);
+    bu_mkdir(runtime_cache);
+    /* Facetization and LoD cache cleanup must preserve controls. */
+    bu_setenv("BU_DIR_CACHE", runtime_cache, 1);
+
+    unpack_apng(av[1], "select.apng", lcache, "select");
 
     /* We are going to generate geometry from the basic moss data,
      * so we make a temporary copy */
@@ -144,6 +152,16 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_ae(gedp, 3, s_av);
 
+    // The default (fast) wireframe has some differences from
+    // the slower full OpenGL draw path - disable it for the
+    // purposes of these tests.
+    s_av[0] = "dm";
+    s_av[1] = "set";
+    s_av[2] = "fast_wireframe";
+    s_av[3] = "0";
+    s_av[4] = NULL;
+    ged_exec_dm(gedp, 4, s_av);
+
     /***** Basic CSG wireframe ****/
     bu_log("Sanity - basic wireframe, no selection...\n");
 
@@ -164,7 +182,7 @@ main(int ac, char *av[]) {
     s_av[1] = NULL;
     ged_exec_autoview(gedp, 1, s_av);
 
-    ret += img_cmp(1, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(1, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
     bu_log("Done.\n");
 
     bu_log("Selecting a single object...\n");
@@ -174,7 +192,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(2, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(2, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("De-selected object...\n");
@@ -184,7 +202,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(1, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(1, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select higher level object...\n");
@@ -194,7 +212,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(2, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(2, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select object below selected object (should be no-op)...\n");
@@ -204,7 +222,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(2, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(2, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select second object...\n");
@@ -214,7 +232,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(3, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(3, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("Select top level object...\n");
     s_av[0] = "select";
@@ -223,7 +241,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(4, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(4, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Expand selection list to solid objects...\n");
@@ -232,7 +250,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(4, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(4, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("De-select one object...\n");
     s_av[0] = "select";
@@ -241,7 +259,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(5, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(5, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Collapse selected paths...\n");
@@ -250,7 +268,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(5, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(5, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Check correct highlighting after Z, selection change and redraw...\n");
@@ -275,7 +293,7 @@ main(int ac, char *av[]) {
     s_av[1] = NULL;
     ged_exec_autoview(gedp, 1, s_av);
 
-    ret += img_cmp(6, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(6, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("Check correct highlighting after clear...\n");
 
@@ -284,7 +302,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(1, gedp, av[1], true, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(1, gedp, lcache, true, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     /***** Basic Mesh wireframe, no LoD ****/
 
@@ -321,7 +339,7 @@ main(int ac, char *av[]) {
     s_av[1] = NULL;
     ged_exec_autoview(gedp, 1, s_av);
 
-    ret += img_cmp(7, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(7, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
     bu_log("Done.\n");
 
     bu_log("Selecting a single object...\n");
@@ -331,7 +349,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(8, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(8, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("De-selected object...\n");
@@ -341,7 +359,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(7, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(7, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select higher level object...\n");
@@ -351,7 +369,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(8, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(8, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select object below selected object (should be no-op)...\n");
@@ -361,7 +379,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(8, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(8, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select second object...\n");
@@ -371,7 +389,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(9, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(9, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("Select top level object...\n");
     s_av[0] = "select";
@@ -380,7 +398,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(10, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(10, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Expand selection list to solid objects...\n");
@@ -389,7 +407,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(10, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(10, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("De-select one object...\n");
     s_av[0] = "select";
@@ -398,7 +416,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(11, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(11, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Collapse selected paths...\n");
@@ -407,7 +425,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(11, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(11, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Check correct highlighting after Z, selection change and redraw...\n");
@@ -432,7 +450,7 @@ main(int ac, char *av[]) {
     s_av[1] = NULL;
     ged_exec_autoview(gedp, 1, s_av);
 
-    ret += img_cmp(12, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(12, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("Check correct highlighting after clear...\n");
 
@@ -441,7 +459,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(7, gedp, av[1], true, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(7, gedp, lcache, true, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     /***** LoD CSG wireframe ****/
@@ -470,7 +488,7 @@ main(int ac, char *av[]) {
     s_av[1] = NULL;
     ged_exec_autoview(gedp, 1, s_av);
 
-    ret += img_cmp(13, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(13, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
     bu_log("Done.\n");
 
     bu_log("Selecting a single object...\n");
@@ -480,7 +498,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(14, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(14, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("De-selected object...\n");
@@ -490,7 +508,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(13, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(13, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select higher level object...\n");
@@ -500,7 +518,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(14, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(14, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select object below selected object (should be no-op)...\n");
@@ -510,7 +528,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(14, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(14, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select second object...\n");
@@ -520,7 +538,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(15, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(15, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("Select top level object...\n");
     s_av[0] = "select";
@@ -529,7 +547,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(16, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(16, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Expand selection list to solid objects...\n");
@@ -538,7 +556,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(16, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(16, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("De-select one object...\n");
     s_av[0] = "select";
@@ -547,7 +565,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(17, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(17, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Collapse selected paths...\n");
@@ -556,7 +574,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(17, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(17, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Check correct highlighting after Z, selection change and redraw...\n");
@@ -581,7 +599,7 @@ main(int ac, char *av[]) {
     s_av[1] = NULL;
     ged_exec_autoview(gedp, 1, s_av);
 
-    ret += img_cmp(18, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(18, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("Check correct highlighting after clear...\n");
 
@@ -590,7 +608,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(13, gedp, av[1], true, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(13, gedp, lcache, true, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     /***** LoD Mesh wireframe ****/
 
@@ -623,7 +641,7 @@ main(int ac, char *av[]) {
     s_av[1] = NULL;
     ged_exec_autoview(gedp, 1, s_av);
 
-    ret += img_cmp(19, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(19, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
     bu_log("Done.\n");
 
     bu_log("Selecting a single object...\n");
@@ -633,7 +651,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(20, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(20, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("De-selected object...\n");
@@ -643,7 +661,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(19, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(19, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select higher level object...\n");
@@ -653,7 +671,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(20, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(20, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select object below selected object (should be no-op)...\n");
@@ -663,7 +681,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(20, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(20, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Select second object...\n");
@@ -673,7 +691,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(21, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(21, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("Select top level object...\n");
     s_av[0] = "select";
@@ -682,7 +700,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(22, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(22, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Expand selection list to solid objects...\n");
@@ -691,7 +709,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(22, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(22, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("De-select one object...\n");
     s_av[0] = "select";
@@ -700,7 +718,7 @@ main(int ac, char *av[]) {
     s_av[3] = NULL;
     ged_exec_select(gedp, 3, s_av);
 
-    ret += img_cmp(23, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(23, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Collapse selected paths...\n");
@@ -709,7 +727,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(23, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(23, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     bu_log("Check correct highlighting after Z, selection change and redraw...\n");
@@ -734,7 +752,7 @@ main(int ac, char *av[]) {
     s_av[1] = NULL;
     ged_exec_autoview(gedp, 1, s_av);
 
-    ret += img_cmp(24, gedp, av[1], false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(24, gedp, lcache, false, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
     bu_log("Check correct highlighting after clear...\n");
 
@@ -743,7 +761,7 @@ main(int ac, char *av[]) {
     s_av[2] = NULL;
     ged_exec_select(gedp, 2, s_av);
 
-    ret += img_cmp(19, gedp, av[1], true, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
+    ret += img_cmp(19, gedp, lcache, true, clear_images, soft_fail, ADIFF_THRES, "select_clear", "select");
 
 
     ged_close(gedp);
@@ -763,4 +781,3 @@ main(int ac, char *av[]) {
 // c-file-style: "stroustrup"
 // End:
 // ex: shiftwidth=4 tabstop=8
-

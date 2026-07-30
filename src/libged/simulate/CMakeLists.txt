@@ -1,13 +1,15 @@
 if(BRLCAD_ENABLE_BULLET)
-  set(BULLET_ROOT ${PROJECT_BINARY_DIR})
-  brlcad_find_package(Bullet REQUIRED)
+  find_package_bullet()
+  if (NOT BULLET_LIBRARIES)
+    message(WARNING "BRLCAD_ENABLE_BULLET=ON, but Bullet3 not found - disabling")
+    set(BRLCAD_ENABLE_BULLET OFF)
+  endif()
+endif()
 
+if(BRLCAD_ENABLE_BULLET)
   if(BULLET_LIBRARIES)
     add_definitions(-DHAVE_BULLET=1)
-    # We build double precision
-    if (BULLET_INCLUDE_DIR MATCHES "${PROJECT_BINARY_DIR}/.*")
-      add_definitions(-DBT_USE_DOUBLE_PRECISION=1)
-    endif()
+    add_definitions(-DBT_USE_DOUBLE_PRECISION=1)
 
     get_filename_component(BULLET_INCLUDE_DIR_FULL "${BULLET_INCLUDE_DIR}" ABSOLUTE)
 
@@ -18,15 +20,14 @@ if(BRLCAD_ENABLE_BULLET)
       endif()
     else()
       set(BULLET_INCLUDE_DIR "${BULLET_INCLUDE_DIR_FULL}")
-      message("EXISTS:  BULLET_INCLUDE_DIR: ${BULLET_INCLUDE_DIR}")
     endif()
     set(BULLET_INCLUDE_DIRS "${BULLET_INCLUDE_DIR}")
     if (NOT EXISTS "${BULLET_INCLUDE_DIRS}")
       message(FATAL_ERROR "Invalid Bullet include directory: ${BULLET_INCLUDE_DIRS}")
     endif()
     set(BULLET_INCLUDE_DIRS "${BULLET_INCLUDE_DIRS}")
+
   endif()
-  message("BULLET_LIBRARIES: ${BULLET_LIBRARIES}")
 endif()
 
 add_subdirectory(tests)
@@ -40,13 +41,14 @@ set(
   rt_instance.cpp
   rt_motion_state.cpp
   rt_roi_collision_shape.cpp
+  sim_animate.cpp
   simulation.cpp
   utility.cpp
 )
 
 set(SIM_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/simulate)
 set(SIM_SYSTEM_INCLUDE_DIRS ${BULLET_INCLUDE_DIRS})
-set(SIM_LIBS libged libbu libbv ${BULLET_LIBRARIES})
+set(SIM_LIBS libged libicv libbv libbu ${BULLET_LIBRARIES})
 
 check_cxx_compiler_flag(-Wno-nonnull-compare NO_NONNULL_COMPARE)
 
@@ -61,7 +63,6 @@ ged_plugin_library(ged-simulate
 
 cmakefiles(
   CMakeLists.txt
-  ${bullet_srcs}
   NOTES
   rt_collision_algorithm.hpp
   rt_collision_shape.hpp
@@ -69,6 +70,7 @@ cmakefiles(
   rt_instance.hpp
   rt_motion_state.hpp
   rt_roi_collision_shape.hpp
+  sim_animate.hpp
   simulation.hpp
   utility.hpp
 )

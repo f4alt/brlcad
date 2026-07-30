@@ -135,7 +135,7 @@ rt_generic_xform(
  * 'attr' is specified to retrieve only one attribute, rather than
  * all.  Example: "db get ell.s B" to get only the B vector.
  */
-int
+C_DECL int
 rt_generic_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *attr)
 {
     register const struct bu_structparse *sp = NULL;
@@ -165,7 +165,7 @@ rt_generic_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const
 	    bu_vls_struct_item(&str, sp,
 			       (char *)intern->idb_ptr, ' ');
 
-	    if (sp->sp_count < 2)
+	    if (sp->sp_count < 2 && bu_vls_strlen(&str))
 		bu_vls_printf(logstr, " %s", bu_vls_addr(&str));
 	    else {
 		bu_vls_printf(logstr, " {");
@@ -210,7 +210,7 @@ rt_generic_make(const struct rt_functab *ftp, struct rt_db_internal *intern)
  * For those solids entirely defined by their parsetab.  Invoked via
  * OBJ[].ft_adjust()
  */
-int
+C_DECL int
 rt_generic_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv)
 {
     const struct rt_functab *ftp;
@@ -232,7 +232,7 @@ rt_generic_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc
  * Invoked via OBJ[].ft_form() on solid types which are
  * fully described by their bu_structparse table in ft_parsetab.
  */
-int
+C_DECL int
 rt_generic_form(struct bu_vls *logstr, const struct rt_functab *ftp)
 {
     RT_CK_FUNCTAB(ftp);
@@ -297,7 +297,7 @@ rt_shaded_plot(struct bv_scene_obj *s, struct rt_db_internal *ip, const struct b
  * Used for solid types that don't have any special modes beyond basic and adaptive
  * plotting
  */
-int
+C_DECL int
 rt_generic_scene_obj(struct bv_scene_obj *s, struct directory *dp, struct db_i *dbip, const struct bg_tess_tol *ttol, const struct bn_tol *tol, const struct bview *v)
 {
     int ret = BRLCAD_ERROR;
@@ -367,7 +367,7 @@ rt_generic_scene_obj(struct bv_scene_obj *s, struct directory *dp, struct db_i *
     // Done with internal contents
     rt_db_free_internal(&intern);
 
-    return BRLCAD_OK;
+    return ret;
 }
 
 /*

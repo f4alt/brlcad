@@ -4,9 +4,7 @@ brlcad_find_package(manifold REQUIRED)
 brlcad_find_package(mmesh REQUIRED)
 brlcad_find_package(OPENNURBS REQUIRED SYSPATTERN openNURBS)
 brlcad_find_package(REGEX REQUIRED)
-brlcad_find_package(Geogram REQUIRED SYSPATTERN geogram)
 find_package_gte(REQUIRED)
-add_definitions(-DUSE_GEOGRAM)
 
 if(BRLCAD_ENABLE_OPENCL)
   add_definitions(-DUSE_OPENCL)
@@ -14,12 +12,17 @@ endif(BRLCAD_ENABLE_OPENCL)
 
 set(
   LIBRT_PRIMEDIT_SOURCES
+  primitives/annot/edannot.c
   primitives/arb8/edarb.c
+  primitives/arbn/edarbn.c
   primitives/ars/edars.c
   primitives/bot/edbot.c
+  primitives/brep/edbrep.cpp
   primitives/bspline/edbspline.c
   primitives/cline/edcline.c
   primitives/datum/eddatum.c
+  primitives/datum/eddatum2.c
+  primitives/revolve/edrevolve.c
   primitives/dsp/eddsp.c
   primitives/ebm/edebm.c
   primitives/ehy/edehy.c
@@ -29,6 +32,7 @@ set(
   primitives/extrude/edextrude.c
   primitives/grip/edgrip.c
   primitives/half/edhalf.c
+  primitives/hrt/edhrt.c
   primitives/hyp/edhyp.c
   primitives/metaball/edmetaball.c
   primitives/nmg/ednmg.c
@@ -43,25 +47,17 @@ set(
   primitives/vol/edvol.c
 )
 
+set(RT_ECMD_SCANNER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/primitives/rt_ecmd_scanner.cpp")
+set(RT_ECMD_SCANNER_TARGET rt_ecmd_scanner)
+add_executable(${RT_ECMD_SCANNER_TARGET} EXCLUDE_FROM_ALL "${RT_ECMD_SCANNER_SRC}")
+set_target_properties(${RT_ECMD_SCANNER_TARGET} PROPERTIES FOLDER "BRL-CAD Build Utilities")
+set(RT_ECMD_SCANNER "$<TARGET_FILE:${RT_ECMD_SCANNER_TARGET}>")
+
 # NOTE - for now this is an internal, build-only header and
 # does not have install logic associated with it.  Eventually,
 # if this API proves out and becomes stable, we may end up
 # installing rt_ecmds.h.  Applications external to the main
 # BRL-CAD build may also want to exploit the callback API.
-set(RT_ECMD_SCANNER ${CMAKE_BINARY_DIR}/CMakeTmp/rt_ecmd_scanner${CMAKE_EXECUTABLE_SUFFIX})
-set(RT_ECMD_SCANNER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/primitives/rt_ecmd_scanner.cpp")
-try_compile(
-  rt_ecmd_scanner
-  "${CMAKE_BINARY_DIR}/CMakeTmp"
-  SOURCES "${RT_ECMD_SCANNER_SRC}"
-  OUTPUT_VARIABLE RT_SCANNER_BLD_OUT
-  COPY_FILE "${RT_ECMD_SCANNER}"
-)
-if (NOT EXISTS ${RT_ECMD_SCANNER})
-  message(FATAL_ERROR "Unable to build edit command scanner: ${RT_SCANNER_BLD_OUT}")
-endif()
-distclean(${RT_ECMD_SCANNER})
-
 set(RT_PFILE_OUT "${CMAKE_BINARY_DIR}/CMakeTmp/rt_primitive_files.txt")
 set(RT_PFILE_IN)
 foreach(esf ${LIBRT_PRIMEDIT_SOURCES})
@@ -76,7 +72,7 @@ add_custom_command(
   OUTPUT ${RT_ECMD_HDR}
   COMMAND ${RT_ECMD_SCANNER} ${RT_PFILE_OUT} ${RT_ECMD_HDR}
   COMMENT "[RT_ECMD_SCANNER] Scanning for RT editing mode flags"
-  DEPENDS "${RT_ECMD_SCANNER_SRC}" ${RT_PFILE_IN}
+  DEPENDS ${RT_ECMD_SCANNER_TARGET} ${RT_PFILE_OUT} ${RT_PFILE_IN}
 )
 distclean(${RT_ECMD_HDR})
 foreach(esf ${LIBRT_PRIMEDIT_SOURCES})
@@ -101,6 +97,7 @@ set(
   cache_lz4.c
   cmd.c
   cyclic.c
+  db_glob.c
   comb/comb.c
   comb/comb_brep.cpp
   comb/comb_mirror.c
@@ -108,8 +105,12 @@ set(
   comb/edcomb.c
   material/material.c
   constraint.c
+  edit_constraint.c
   cut.c
   cut_hlbvh.c
+  cut_null.c
+  cut_nubsp.c
+  default.c
   db5_alloc.c
   db5_attr.c
   db5_attr_registry.cpp
@@ -179,6 +180,7 @@ set(
   primitives/dsp/dsp.c
   primitives/dsp/dsp_brep.cpp
   primitives/dsp/dsp_mirror.c
+  primitives/dsp/dsp_sa_vol.c
   primitives/dsp/dsp_tess.cpp
   primitives/ebm/ebm.c
   primitives/ebm/ebm_brep.cpp
@@ -255,6 +257,7 @@ set(
   primitives/poly/poly_brep.cpp
   primitives/poly/poly_mirror.c
   primitives/primitive_util.c
+  primitives/rec/edrec.c
   primitives/rec/rec.c
   primitives/revolve/revolve.c
   primitives/revolve/revolve_brep.cpp
@@ -271,6 +274,7 @@ set(
   primitives/sketch/sketch.c
   primitives/sketch/sketch_brep.cpp
   primitives/sketch/sketch_tess.cpp
+  primitives/sph/edsph.c
   primitives/sph/sph.c
   primitives/sph/sph_brep.cpp
   primitives/submodel/submodel.c
@@ -312,6 +316,7 @@ set(
 set(
   librt_ignored_files
   cache.h
+  cut_private.h
   librt_private.h
   material/materialX.cpp
   material/materialX.h
@@ -319,6 +324,7 @@ set(
   prcomb.c
   primitives/bot/bot_edge.h
   primitives/bot/bot_wireframe.cpp
+  primitives/bot/edbot.c
   primitives/bot/tie.c
   primitives/bot/tie_kdtree.c
   primitives/bot/tieprivate.h
@@ -368,6 +374,12 @@ set(
 )
 cmakefiles(${librt_ignored_files})
 
+# tie violates the One Definition Rule when we compile as C++
+set_source_files_properties(primitives/bot/btg.c PROPERTIES NO_CXX_COMPILE TRUE)
+set_source_files_properties(primitives/bot/btgf.c PROPERTIES NO_CXX_COMPILE TRUE)
+set_source_files_properties(primitives/bot/tie.c PROPERTIES NO_CXX_COMPILE TRUE)
+set_source_files_properties(primitives/bot/tie_kdtree.c PROPERTIES NO_CXX_COMPILE TRUE)
+
 set(
   CL_FILES
   primitives/bool.cl
@@ -407,14 +419,12 @@ if(BRLCAD_ENABLE_SPR)
 endif(BRLCAD_ENABLE_SPR)
 
 # Note - librt_deps is defined by ${BRLCAD_SOURCE_DIR}/src/source_dirs.cmake
+set(LIBRT_PUBLIC_LIBS ${librt_deps} OPENNURBS::OPENNURBS)
 set(
-  LIBRT_LIBS
+  LIBRT_PRIVATE_LIBS
   ${OPENCL_LIBS}
-  ${librt_deps}
-  ${OPENNURBS_LIBRARIES}
-  ${Geogram_LIBRARY}
   mmesh::mmesh
-  ${REGEX_LIBRARIES}
+  REGEX::REGEX
   ${WINSOCK_LIB}
   ${RPCRT_LIB}
   ${STDCXX_LIBRARIES}
@@ -422,7 +432,10 @@ set(
 )
 
 # Include directories needed by librt users
-set(RT_INCLUDE_DIRS ${OPENNURBS_INCLUDE_DIRS} ${OPENCL_INCLUDE_DIRS} ${GTE_INCLUDE_DIR})
+# ${GTE_INCLUDE_DIR} is still needed by primitives/bot/bot_oriented_bbox.cpp
+# which uses GTE's ContOrientedBox3.h.
+set(RT_INCLUDE_DIRS ${OPENNURBS_INCLUDE_DIRS} ${OPENCL_INCLUDE_DIRS}
+  ${GTE_INCLUDE_DIR})
 
 # locally used but not needed by users of the library
 set(
@@ -430,12 +443,13 @@ set(
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/vds
   ${REGEX_INCLUDE_DIRS}
-  ${Geogram_INCLUDE_DIR}
 )
 # FIXME: needs materialX
 #  ${CMAKE_CURRENT_SOURCE_DIR}/../../../MaterialXSource/source
 
-brlcad_addlib(librt "${LIBRT_SOURCES}" "${LIBRT_LIBS}" "${RT_INCLUDE_DIRS}" "${RT_LOCAL_INCLUDE_DIRS}"
+brlcad_addlib(librt "${LIBRT_SOURCES}" "${RT_INCLUDE_DIRS}" "${RT_LOCAL_INCLUDE_DIRS}"
+  PUBLIC_LIBS ${LIBRT_PUBLIC_LIBS}
+  PRIVATE_LIBS ${LIBRT_PRIVATE_LIBS}
   # Files that cannot be safely batched into unity translation units:
   # - search.cpp and search_old.cpp both define enumerators N_ABOVE, N_AND, etc.
   #   in their respective (differently-named) enums; those clashing enumerator
@@ -479,7 +493,7 @@ brlcad_addlib(librt "${LIBRT_SOURCES}" "${LIBRT_LIBS}" "${RT_INCLUDE_DIRS}" "${R
 )
 
 # set(MATERIALX_LIBS ${CMAKE_CURRENT_SOURCE_DIR}/../../../MaterialXSource/lib/MaterialXCore.lib;${CMAKE_CURRENT_SOURCE_DIR}/../../../MaterialXSource/lib/MaterialXFormat.lib;${CMAKE_CURRENT_SOURCE_DIR}/../../../MaterialXSource/lib/MaterialXGenOsl.lib;${CMAKE_CURRENT_SOURCE_DIR}/../../../MaterialXSource/lib/MaterialXGenShader.lib)
-# BRLCAD_ADDLIB(librt "${LIBRT_SOURCES}" "${MATERIALX_LIBS};${OPENCL_LIBS};libbrep;libnmg;libbg;libbv;libbn;libbu;${OPENNURBS_LIBRARIES};${REGEX_LIBRARIES};${WINSOCK_LIB};${RPCRT_LIB};${STDCXX_LIBRARIES}")
+# BRLCAD_ADDLIB(librt "${LIBRT_SOURCES}" "${RT_INCLUDE_DIRS}" "${RT_LOCAL_INCLUDE_DIRS}" PUBLIC_LIBS libbrep libnmg libbg libbv libbn libbu PRIVATE_LIBS ${MATERIALX_LIBS} ${OPENCL_LIBS} ${OPENNURBS_LIBRARIES} ${REGEX_LIBRARIES} ${WINSOCK_LIB} ${RPCRT_LIB} ${STDCXX_LIBRARIES})
 
 set_target_properties(librt PROPERTIES VERSION 20.0.1 SOVERSION 20)
 if(HIDE_INTERNAL_SYMBOLS)
@@ -489,6 +503,10 @@ if(HIDE_INTERNAL_SYMBOLS)
     set_property(TARGET librt-obj APPEND PROPERTY COMPILE_DEFINITIONS "TIE_DLL_EXPORTS")
     set_property(TARGET librt-obj APPEND PROPERTY COMPILE_DEFINITIONS "DB5_DLL_EXPORTS")
   endif(TARGET librt-obj)
+  if(TARGET librt-brlcad-obj)
+    set_property(TARGET librt-brlcad-obj APPEND PROPERTY COMPILE_DEFINITIONS "TIE_DLL_EXPORTS")
+    set_property(TARGET librt-brlcad-obj APPEND PROPERTY COMPILE_DEFINITIONS "DB5_DLL_EXPORTS")
+  endif(TARGET librt-brlcad-obj)
 endif(HIDE_INTERNAL_SYMBOLS)
 
 # loudly append an underscore on musl so that we build by default but

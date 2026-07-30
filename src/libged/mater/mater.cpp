@@ -1083,7 +1083,7 @@ mater_set(struct ged *gedp, size_t argc, const char *argv[])
     /* Parse argv density arguments */
     std::regex d_reg("([0-9]+)[\\s, ]+([-+]?[0-9]*[\\.]?[0-9eE+-]*)[\\s, ]+(.*)");
     for (size_t i = 1; i < argc; i++) {
-	long int id;
+	long int id = 0;
 	fastf_t density;
 	std::smatch sm;
 	std::string dstr(argv[i]);
@@ -1675,6 +1675,8 @@ mater_density(struct ged *gedp, size_t argc, const char *argv[])
 	argc--; argv++;
 	return mater_mat_id(gedp, argc, argv);
     }
+
+    bu_vls_printf(gedp->ged_result_str, "Unknown -d subcommand: %s\n%s", argv[1], mater_usage);
     return BRLCAD_ERROR;
 }
 
@@ -1703,7 +1705,7 @@ ged_mater_core(struct ged *gedp, int argc, const char *argv[])
 	return mater_shader(gedp, argc, argv);
     }
 
-    if (BU_STR_EQUAL(argv[1], "-d")) {
+    if (BU_STR_EQUAL(argv[1], "-d") || BU_STR_EQUAL(argv[1], "density")) {
 	argv[1] = argv[0];
 	argc--; argv++;
 	return mater_density(gedp, argc, argv);

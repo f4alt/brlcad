@@ -39,7 +39,7 @@
 #define ECMD_EBM_FSIZE		12054	/* set EBM file size */
 #define ECMD_EBM_HEIGHT		12055	/* set EBM extrusion depth */
 
-void
+C_DECL void
 rt_edit_ebm_set_edit_mode(struct rt_edit *s, int mode)
 {
     rt_edit_set_edflag(s, mode);
@@ -71,7 +71,7 @@ struct rt_edit_menu_item ebm_menu[] = {
     { "", NULL, 0 }
 };
 
-struct rt_edit_menu_item *
+C_DECL struct rt_edit_menu_item *
 rt_edit_ebm_menu_item(const struct bn_tol *UNUSED(tol))
 {
     return ebm_menu;
@@ -143,7 +143,8 @@ static const struct rt_edit_cmd_desc ebm_cmds[] = {
 	1,                    /* nparam       */
 	ebm_fname_params,     /* params       */
 	0,                    /* interactive  */
-	10                    /* display_order */
+	10                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_EBM_FSIZE,       /* cmd_id       */
@@ -152,7 +153,8 @@ static const struct rt_edit_cmd_desc ebm_cmds[] = {
 	2,                    /* nparam       */
 	ebm_fsize_params,     /* params       */
 	0,                    /* interactive  */
-	20                    /* display_order */
+	20                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_EBM_HEIGHT,      /* cmd_id       */
@@ -161,7 +163,8 @@ static const struct rt_edit_cmd_desc ebm_cmds[] = {
 	1,                    /* nparam       */
 	ebm_height_params,    /* params       */
 	1,                    /* interactive  */
-	30                    /* display_order */
+	30                    /* display_order */,
+	NULL                  /* req_types */
     }
 };
 
@@ -169,10 +172,12 @@ static const struct rt_edit_prim_desc ebm_prim_desc = {
     "ebm",                /* prim_type    */
     "Extruded Bitmap",    /* prim_label   */
     3,                    /* ncmd         */
-    ebm_cmds              /* cmds         */
+    ebm_cmds              /* cmds         */,
+    0,                    /* nopt         */
+    NULL                  /* opts         */
 };
 
-const struct rt_edit_prim_desc *
+C_DECL const struct rt_edit_prim_desc *
 rt_edit_ebm_edit_desc(void)
 {
     return &ebm_prim_desc;
@@ -321,7 +326,7 @@ ecmd_ebm_height(struct rt_edit *s)
     return BRLCAD_OK;
 }
 
-int
+C_DECL int
 rt_edit_ebm_edit(struct rt_edit *s)
 {
     switch (s->edit_flag) {
@@ -356,7 +361,7 @@ rt_edit_ebm_edit(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_ebm_edit_xy(
 	struct rt_edit *s,
 	const vect_t mousevec

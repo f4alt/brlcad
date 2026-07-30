@@ -74,11 +74,14 @@
 #include "vmath.h"
 #include "bn/mat.h"
 #include "bu/parse.h"
+#include "bu/avs.h"
 #include "bv/defines.h"
 #include "rt/defines.h"
 #include "rt/db_internal.h"
 
 __BEGIN_DECLS
+
+struct db_full_path;
 
 // Settings used for both solid and matrix edits
 #define RT_EDIT_DEFAULT   -1
@@ -211,6 +214,11 @@ struct rt_edit {
     // application level drawing code to figure out which solids in the comb need
     // to be visualized as part of the active editing geometry.
     struct bu_ptbl comb_insts;
+
+    // Dynamic configuration options (key-value pairs)
+    // used to pass settings from calling code down into primitive edit logic
+    // (e.g., "raw_mode" to bypass simplification).
+    struct bu_attribute_value_set options;
 
     // Tolerance for calculations
     const struct bn_tol *tol;
@@ -396,6 +404,20 @@ rt_edit_reinit(struct rt_edit *s, struct db_full_path *dfp, struct db_i *dbip,
                struct bn_tol *tol, struct bview *v);
 
 /**
+ * Set a dynamic option for this editing session.
+ * These options are available to primitive-specific editing logic.
+ */
+RT_EXPORT extern int
+rt_edit_set_opt(struct rt_edit *s, const char *key, const char *val);
+
+/**
+ * Retrieve a dynamic option for this editing session.
+ * Returns NULL if the option is not set.
+ */
+RT_EXPORT extern const char *
+rt_edit_get_opt(struct rt_edit *s, const char *key);
+
+/**
  * Set a string parameter in the edit struct's e_str[] array.
  *
  * @param s      The edit struct to update.
@@ -516,7 +538,7 @@ rt_edit_revert(struct rt_edit *s);
 /* Edit menu items encode information about specific edit operations, as well
  * as info documenting them.  Edit functab methods use this data type. */
 struct rt_edit_menu_item {
-    char *menu_string;
+    const char *menu_string;
     void (*menu_func)(struct rt_edit *, int, int, int, void *);
     int menu_arg;
 };
@@ -595,6 +617,18 @@ struct rt_edit_cmd_desc {
     /** Suggested display order within the category group.  Lower values
      *  appear first.  Ties are broken by array order. */
     int          display_order;
+    /** Comma-separated list of types this cmd is valid for (e.g. "sph" or "arb4"). NULL means all. */
+    const char  *req_types;
+};
+
+/**
+ * Describes a dynamically toggleable option for a primitive.
+ */
+struct rt_edit_opt_desc {
+    const char *name;      /**< machine-readable id, e.g. "raw_mode" */
+    const char *label;     /**< human-readable widget label */
+    const char *desc;      /**< description of option behavior */
+    int type;              /**< RT_EDIT_PARAM_* type code */
 };
 
 /**
@@ -606,6 +640,8 @@ struct rt_edit_prim_desc {
     const char                    *prim_label; /**< "Torus", "Ellipsoid", ...         */
     int                            ncmd;
     const struct rt_edit_cmd_desc *cmds;       /**< array of ncmd entries             */
+    int                            nopt;       /**< number of entries in opts[]       */
+    const struct rt_edit_opt_desc *opts;       /**< array of nopt entries             */
 };
 
 /**
@@ -625,6 +661,120 @@ rt_edit_prim_desc_to_json(struct bu_vls *out,
  */
 RT_EXPORT extern int
 rt_edit_type_to_json(struct bu_vls *out, int prim_type_id);
+
+
+
+/***************************************************
+ * Experiments with expressing editing constraints
+ ***************************************************/
+
+enum rt_constraint_edit_policy {
+    RT_CONSTRAINT_EDIT_REJECT = 0,
+    RT_CONSTRAINT_EDIT_WARN_ONLY,
+    RT_CONSTRAINT_EDIT_SNAP,
+    RT_CONSTRAINT_EDIT_SNAP_IF_WITHIN_TOL
+};
+
+enum rt_constraint_edit_severity {
+    RT_CONSTRAINT_EDIT_INFO = 0,
+    RT_CONSTRAINT_EDIT_WARN,
+    RT_CONSTRAINT_EDIT_ERROR
+};
+
+enum rt_constraint_edit_op_kind {
+    RT_CONSTRAINT_EDIT_OP_MOVE_POINT = 0,
+    RT_CONSTRAINT_EDIT_OP_ADD_POINT,
+    RT_CONSTRAINT_EDIT_OP_INSERT_POINT,
+    RT_CONSTRAINT_EDIT_OP_DELETE_POINT,
+    RT_CONSTRAINT_EDIT_OP_SET_OD,
+    RT_CONSTRAINT_EDIT_OP_SET_ID,
+    RT_CONSTRAINT_EDIT_OP_SET_BEND,
+    RT_CONSTRAINT_EDIT_OP_SCALE_OD,
+    RT_CONSTRAINT_EDIT_OP_SCALE_ID,
+    RT_CONSTRAINT_EDIT_OP_SCALE_BEND
+};
+
+struct rt_constraint_edit_param_ref {
+    const char *name;
+    int index0;
+    int index1;
+};
+
+struct rt_constraint_edit_violation {
+    int code;
+    enum rt_constraint_edit_severity severity;
+    struct rt_constraint_edit_param_ref a;
+    struct rt_constraint_edit_param_ref b;
+    fastf_t value_a;
+    fastf_t value_b;
+    struct bu_vls msg;
+};
+
+struct rt_constraint_edit_metric {
+    fastf_t w_coord;
+    fastf_t w_od;
+    fastf_t w_id;
+    fastf_t w_bend;
+};
+
+struct rt_constraint_edit_tolerances {
+    fastf_t max_coord_delta;
+    fastf_t max_od_delta;
+    fastf_t max_id_delta;
+    fastf_t max_bend_delta;
+    fastf_t max_total_cost;
+};
+
+struct rt_constraint_edit_op {
+    enum rt_constraint_edit_op_kind kind;
+    int point_index;
+    vect_t proposed_coord;
+    fastf_t proposed_scalar;
+};
+
+struct rt_constraint_edit_result {
+    int accepted;
+    int snapped;
+    int violation_count_before;
+    int violation_count_after;
+    fastf_t total_cost;
+    struct bu_ptbl changed_params;
+    struct bu_ptbl violations;
+    struct bu_vls summary;
+};
+
+struct rt_constraint_edit_ctx {
+    enum rt_constraint_edit_policy policy;
+    struct rt_constraint_edit_metric metric;
+    struct rt_constraint_edit_tolerances tol;
+    int diagnostics_verbosity;
+};
+
+typedef int (*rt_constraint_edit_validate_t)(
+    struct bu_ptbl *violations,
+    const struct rt_db_internal *ip,
+    const struct rt_constraint_edit_ctx *ctx);
+
+typedef int (*rt_constraint_edit_project_apply_t)(
+    struct rt_constraint_edit_result *out,
+    struct rt_db_internal *ip,
+    const struct rt_constraint_edit_op *op,
+    const struct rt_constraint_edit_ctx *ctx);
+
+typedef fastf_t (*rt_constraint_edit_score_delta_t)(
+    const struct rt_db_internal *before_ip,
+    const struct rt_db_internal *after_ip,
+    const struct rt_constraint_edit_metric *metric);
+
+RT_EXPORT extern void rt_constraint_edit_violation_init(struct rt_constraint_edit_violation *v);
+RT_EXPORT extern void rt_constraint_edit_violation_free(struct rt_constraint_edit_violation *v);
+
+RT_EXPORT extern void rt_constraint_edit_result_init(struct rt_constraint_edit_result *r);
+RT_EXPORT extern void rt_constraint_edit_result_clear(struct rt_constraint_edit_result *r);
+RT_EXPORT extern void rt_constraint_edit_result_free(struct rt_constraint_edit_result *r);
+
+
+
 
 
 __END_DECLS

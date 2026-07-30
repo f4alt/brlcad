@@ -43,6 +43,7 @@
 #include "raytrace.h"
 
 #include "../fixpt.h"
+#include "../../librt_private.h"
 
 
 /*
@@ -64,7 +65,7 @@ struct rt_vol_specific {
 
 #define VOL_O(m) bu_offsetof(struct rt_vol_internal, m)
 
-const struct bu_structparse rt_vol_parse[] = {
+EXTERNCPP const struct bu_structparse rt_vol_parse[] = {
     {"%s", RT_VOL_NAME_LEN, "file", bu_offsetof(struct rt_vol_internal, name), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
     {"%s", RT_VOL_NAME_LEN, "name", bu_offsetof(struct rt_vol_internal, name), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
     {"%c", 1, "src",	VOL_O(datasrc),	BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
@@ -78,11 +79,13 @@ const struct bu_structparse rt_vol_parse[] = {
     {"", 0, (char *)0, 0, BU_STRUCTPARSE_FUNC_NULL, NULL, NULL }
 };
 
-
+__BEGIN_DECLS
 extern void rt_vol_plate(point_t a, point_t b, point_t c, point_t d,
 			 mat_t mat, struct bu_list *vlfree, struct bu_list *vhead, struct rt_vol_internal *vip);
 extern int rt_retrieve_binunif(struct rt_db_internal *intern, const struct db_i *dbip, const char *name);
 extern int rt_binunif_describe(struct bu_vls  *str, const struct rt_db_internal *ip, int verbose, double mm2local);
+__END_DECLS
+
 /*
  * Codes to represent surface normals.
  * In a bitmap, there are only 4 possible normals.
@@ -124,7 +127,7 @@ static int rt_vol_normtab[3] = { NORM_XPOS, NORM_YPOS, NORM_ZPOS };
  * Return intersection segments.
  *
  */
-int
+C_DECL int
 rt_vol_shot(struct soltab *stp, register struct xray *rp, struct application *ap, struct seg *seghead)
 {
     register struct rt_vol_specific *volp =
@@ -423,23 +426,120 @@ rt_vol_shot(struct soltab *stp, register struct xray *rp, struct application *ap
 }
 
 
+static size_t
+vol_from_file(const struct bu_mapped_file* mfile, size_t xdim, size_t ydim, size_t zdim, unsigned char **map)
+{
+    size_t y;
+    size_t z;
+    size_t ret = 0;
+    size_t nbytes;
+
+    /* Get bit map from .bw(5) file */
+    nbytes = (xdim+VOL_XWIDEN*2)*
+	(ydim+VOL_YWIDEN*2)*
+	(zdim+VOL_ZWIDEN*2);
+    *map = (unsigned char *)bu_calloc(1, nbytes, "vol_import4 bitmap");
+
+    /* Because of in-memory padding, read each scanline separately */
+    const unsigned char* cp = (const unsigned char*)mfile->buf;
+    for (z = 0; z < zdim; z++) {
+	for (y = 0; y < ydim; y++) {
+	    void *data = &VOLMAP(*map, xdim, ydim, 0, y, z);
+
+	    /* copy from file buf */
+	    memcpy(data, cp, xdim);
+	    cp += xdim;
+
+	    /* track read */
+	    ret += xdim;
+	}
+    }
+
+    return ret;
+}
+
+
+/**
+ * Read VOL data from external file
+ * Returns :
+ * 0 success
+ * !0 fail
+ */
+static int
+vol_file_data(struct rt_vol_internal *vip, const struct db_i *dbip)
+{
+    size_t nbytes;
+    struct bu_mapped_file* mfile = NULL;
+    const char* filename = vip->name;
+
+    /* try to open the file. If it can't be found, look in the parent file's dir */
+    if (!bu_file_readable(filename) && dbip && dbip->dbi_filepath) {
+	/* dbip is optional for V4 and below */
+	mfile = bu_open_mapped_file_with_path(dbip->dbi_filepath, filename, "vol");
+    } else {
+	mfile = bu_open_mapped_file(filename, "vol");
+    }
+
+    /* make sure we got something */
+    if (!mfile) {
+	bu_log("ERROR: unable to open data file: '%s'\n", filename);
+	return 1;
+    }
+
+    /* quick check: file buff should be atleast as big as dimensions */
+    size_t expected = (size_t)vip->xdim * vip->ydim * vip->zdim;
+    if (mfile->buflen < expected) {
+	bu_log("ERROR: data file '%s' too small (%zu bytes, need %zu)\n", filename, mfile->buflen, expected);
+
+	bu_close_mapped_file(mfile);
+	return 1;
+    }
+
+    /* extract vol from the file */
+    nbytes = vol_from_file(mfile, vip->xdim, vip->ydim, vip->zdim, &vip->map);
+    if (nbytes != expected) {
+	bu_log("ERROR: unexpected VOL bytes (read %zu, expected %zu) in %s\n", nbytes, expected, vip->name);
+
+	bu_close_mapped_file(mfile);
+	return 1;
+    }
+
+    /* NOTE: bu_close_mapped_file does not free the memory associated. To not effect any other primitives
+     *  accidentally (ebm, dsp, hf, etc.) we don't call it either with the assumption that this is being run
+     *  through normal db operations (bu_close calls bu_free_mapped_files()).
+     */
+    bu_close_mapped_file(mfile);
+    return 0;
+}
+
+
+/**
+ * Baseline flat-array vshot: delegates to the scalar shot via rt_vshot_via_shot().
+ */
+C_DECL void
+rt_vol_vshot(struct soltab *stp[], struct xray *rp[], struct seg *segp, int n, struct application *ap)
+/* An array of solids */
+/* An array of rays */
+/* array of segs (results returned) */
+/* Number of ray/object pairs */
+
+{
+    rt_vshot_via_shot(rt_vol_shot, stp, rp, segp, n, ap);
+}
+
+
 /**
  * Read in the information from the string solid record.
  * Then, as a service to the application, read in the bitmap
  * and set up some of the associated internal variables.
  */
-int
+C_DECL int
 rt_vol_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     union record *rp;
     register struct rt_vol_internal *vip;
     struct bu_vls str = BU_VLS_INIT_ZERO;
-    FILE *fp;
-    int nbytes;
-    size_t y;
-    size_t z;
     mat_t tmat;
-    size_t ret;
 
     if (dbip) RT_CK_DBI(dbip);
 
@@ -491,40 +591,11 @@ rt_vol_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fa
     bn_mat_mul(tmat, mat, vip->mat);
     MAT_COPY(vip->mat, tmat);
 
-    /* Get bit map from .bw(5) file */
-    nbytes = (vip->xdim+VOL_XWIDEN*2)*
-	(vip->ydim+VOL_YWIDEN*2)*
-	(vip->zdim+VOL_ZWIDEN*2);
-    vip->map = (unsigned char *)bu_calloc(1, nbytes, "vol_import4 bitmap");
-
-    bu_semaphore_acquire(BU_SEM_SYSCALL);		/* lock */
-    if ((fp = fopen(vip->name, "rb")) == NULL) {
-	perror(vip->name);
-	bu_semaphore_release(BU_SEM_SYSCALL);		/* unlock */
+    /* extract data from file */
+    if (vol_file_data(vip, dbip)) {
 	return -1;
     }
-    bu_semaphore_release(BU_SEM_SYSCALL);		/* unlock */
 
-    /* Because of in-memory padding, read each scanline separately */
-    for (z = 0; z < vip->zdim; z++) {
-	for (y = 0; y < vip->ydim; y++) {
-	    void *data = &VOLMAP(vip->map, vip->xdim, vip->ydim, 0, y, z);
-	    bu_semaphore_acquire(BU_SEM_SYSCALL);		/* lock */
-	    ret = fread(data, vip->xdim, 1, fp); /* res_syscall */
-	    bu_semaphore_release(BU_SEM_SYSCALL);		/* unlock */
-	    if (ret < 1) {
-		bu_log("rt_vol_import4(%s): Unable to read whole VOL, y=%zu, z=%zu\n",
-		       vip->name, y, z);
-		bu_semaphore_acquire(BU_SEM_SYSCALL);		/* lock */
-		fclose(fp);
-		bu_semaphore_release(BU_SEM_SYSCALL);		/* unlock */
-		return -1;
-	    }
-	}
-    }
-    bu_semaphore_acquire(BU_SEM_SYSCALL);		/* lock */
-    fclose(fp);
-    bu_semaphore_release(BU_SEM_SYSCALL);		/* unlock */
     return 0;
 }
 
@@ -532,7 +603,7 @@ rt_vol_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fa
 /**
  * The name will be added by the caller.
  */
-int
+C_DECL int
 rt_vol_export4(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_vol_internal *vip;
@@ -564,77 +635,6 @@ rt_vol_export4(struct bu_external *ep, const struct rt_db_internal *ip, double l
     bu_vls_free(&str);
 
     return 0;
-}
-
-
-static size_t
-vol_from_file(const char *file, size_t xdim, size_t ydim, size_t zdim, unsigned char **map)
-{
-    size_t y;
-    size_t z;
-    size_t ret = 0;
-    size_t nbytes;
-    FILE *fp;
-
-    /* Get bit map from .bw(5) file */
-    nbytes = (xdim+VOL_XWIDEN*2)*
-	(ydim+VOL_YWIDEN*2)*
-	(zdim+VOL_ZWIDEN*2);
-    *map = (unsigned char *)bu_calloc(1, nbytes, "vol_import4 bitmap");
-
-    bu_semaphore_acquire(BU_SEM_SYSCALL);		/* lock */
-    if ((fp = fopen(file, "rb")) == NULL) {
-	perror(file);
-	bu_semaphore_release(BU_SEM_SYSCALL);		/* unlock */
-	return 0;
-    }
-    bu_semaphore_release(BU_SEM_SYSCALL);		/* unlock */
-
-    /* Because of in-memory padding, read each scanline separately */
-    for (z = 0; z < zdim; z++) {
-	for (y = 0; y < ydim; y++) {
-	    size_t fret;
-	    void *data = &VOLMAP(*map, xdim, ydim, 0, y, z);
-
-	    bu_semaphore_acquire(BU_SEM_SYSCALL);	/* lock */
-	    fret = fread(data, xdim, 1, fp);		/* res_syscall */
-	    bu_semaphore_release(BU_SEM_SYSCALL);	/* unlock */
-	    if (fret < 1) {
-		bu_log("rt_vol_import4(%s): Unable to read whole VOL, y=%zu, z=%zu\n", file, y, z);
-		bu_semaphore_acquire(BU_SEM_SYSCALL);	/* lock */
-		fclose(fp);
-		bu_semaphore_release(BU_SEM_SYSCALL);	/* unlock */
-		return 0;
-	    }
-	    ret += xdim;
-	}
-    }
-    bu_semaphore_acquire(BU_SEM_SYSCALL);		/* lock */
-    fclose(fp);
-    bu_semaphore_release(BU_SEM_SYSCALL);		/* unlock */
-
-    return ret;
-}
-
-
-/**
- * Read VOL data from external file
- * Returns :
- * 0 success
- * !0 fail
- */
-static int
-vol_file_data(struct rt_vol_internal *vip)
-{
-   size_t nbytes;
-
-   size_t bytes = vip->xdim * vip->ydim * vip->zdim;
-	nbytes = vol_from_file(vip->name, vip->xdim, vip->ydim, vip->zdim, &vip->map);
-	if (nbytes != bytes) {
-	    bu_log("WARNING: unexpected VOL bytes (read %zu, expected %zu) in %s\n", nbytes, bytes, vip->name);
-	}
-
-   return 0;
 }
 
 
@@ -736,7 +736,7 @@ get_vol_data(struct rt_vol_internal *vip, const struct db_i *dbip)
 	    if (RT_G_DEBUG & RT_DEBUG_HF)
 		bu_log("getting data from file \"%s\"\n", vip->name);
 
-	    if(vol_file_data(vip) != 0) {
+	    if (vol_file_data(vip, dbip) != 0) {
 		return 1;
 	    }
 	    else {
@@ -767,7 +767,7 @@ get_vol_data(struct rt_vol_internal *vip, const struct db_i *dbip)
     return 0; //temporary
 }
 
-int
+C_DECL int
 rt_vol_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !ip || !mat)
@@ -791,7 +791,7 @@ rt_vol_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_inter
  * Then, as a service to the application, read in the bitmap
  * and set up some of the associated internal variables.
  */
-int
+C_DECL int
 rt_vol_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     register struct rt_vol_internal *vip;
@@ -852,7 +852,7 @@ rt_vol_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fa
 /**
  * The name will be added by the caller.
  */
-int
+C_DECL int
 rt_vol_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_vol_internal *vip;
@@ -888,7 +888,7 @@ rt_vol_export5(struct bu_external *ep, const struct rt_db_internal *ip, double l
  * First line describes type of solid.
  * Additional lines are indented one tab, and give parameter values.
  */
-int
+C_DECL int
 rt_vol_describe(struct bu_vls *str, const struct rt_db_internal *ip, int UNUSED(verbose), double mm2local)
 {
     struct rt_vol_internal *vip = (struct rt_vol_internal *)ip->idb_ptr;
@@ -935,7 +935,7 @@ rt_vol_describe(struct bu_vls *str, const struct rt_db_internal *ip, int UNUSED(
 /**
  * Free the storage associated with the rt_db_internal version of this solid.
  */
-void
+C_DECL void
 rt_vol_ifree(struct rt_db_internal *ip)
 {
     register struct rt_vol_internal *vip;
@@ -959,7 +959,7 @@ rt_vol_ifree(struct rt_db_internal *ip)
 /**
  * Calculate bounding RPP for vol
  */
-int
+C_DECL int
 rt_vol_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct bn_tol *UNUSED(tol))
 {
     register struct rt_vol_internal *vip;
@@ -986,7 +986,7 @@ rt_vol_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct 
  * A struct rt_vol_specific is created, and its address is stored
  * in stp->st_specific for use by rt_vol_shot().
  */
-int
+C_DECL int
 rt_vol_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 {
     struct rt_vol_internal *vip;
@@ -1037,7 +1037,7 @@ rt_vol_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 }
 
 
-void
+C_DECL void
 rt_vol_print(register const struct soltab *stp)
 {
     register const struct rt_vol_specific *volp =
@@ -1058,7 +1058,7 @@ rt_vol_print(register const struct soltab *stp)
  * This is mostly a matter of translating the stored
  * code into the proper normal.
  */
-void
+C_DECL void
 rt_vol_norm(register struct hit *hitp, struct soltab *stp, register struct xray *rp)
 {
     register struct rt_vol_specific *volp =
@@ -1100,7 +1100,7 @@ rt_vol_norm(register struct hit *hitp, struct soltab *stp, register struct xray 
 /**
  * Everything has sharp edges.  This makes things easy.
  */
-void
+C_DECL void
 rt_vol_curve(register struct curvature *cvp, register struct hit *hitp, struct soltab *stp)
 {
     if (!cvp || !hitp)
@@ -1117,7 +1117,7 @@ rt_vol_curve(register struct curvature *cvp, register struct hit *hitp, struct s
  * Map the hit point in 2-D into the range 0..1
  * untransformed X becomes U, and Y becomes V.
  */
-void
+C_DECL void
 rt_vol_uv(struct application *ap, struct soltab *stp, register struct hit *hitp, register struct uvcoord *uvp)
 {
     if (ap) RT_CK_APPLICATION(ap);
@@ -1130,7 +1130,7 @@ rt_vol_uv(struct application *ap, struct soltab *stp, register struct hit *hitp,
 }
 
 
-void
+C_DECL void
 rt_vol_free(struct soltab *stp)
 {
     register struct rt_vol_specific *volp =
@@ -1145,7 +1145,7 @@ rt_vol_free(struct soltab *stp)
 }
 
 
-int
+C_DECL int
 rt_vol_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_tess_tol *UNUSED(ttol), const struct bn_tol *UNUSED(tol), const struct bview *UNUSED(info))
 {
     register struct rt_vol_internal *vip;
@@ -1323,7 +1323,7 @@ struct vol_patch_rect {
 };
 
 
-int
+C_DECL int
 rt_vol_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, const struct bg_tess_tol *ttol, const struct bn_tol *tol)
 {
     struct rt_vol_internal *vip;
@@ -1598,7 +1598,7 @@ fail:
 }
 
 
-int
+C_DECL int
 rt_vol_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
 {
     if (ip) RT_CK_DB_INTERNAL(ip);
@@ -1607,7 +1607,7 @@ rt_vol_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_vol_centroid(point_t *cent, const struct rt_db_internal *ip)
 {
     register struct rt_vol_internal *vip;
@@ -1649,7 +1649,7 @@ rt_vol_centroid(point_t *cent, const struct rt_db_internal *ip)
  * the matrix and then summing the area of the faces of each cell necessary.
  * The vertices are numbered from left to right, front to back, bottom to top.
  */
-void
+C_DECL void
 rt_vol_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 {
     struct rt_vol_internal *vip;
@@ -1749,7 +1749,7 @@ rt_vol_surf_area(fastf_t *area, const struct rt_db_internal *ip)
  * The eight vertices are calculated, then transformed by the matrix and the
  * volume calculated from that.
  */
-void
+C_DECL void
 rt_vol_volume(fastf_t *volume, const struct rt_db_internal *ip)
 {
     struct rt_vol_internal *vip;
@@ -1817,7 +1817,7 @@ rt_vol_volume(fastf_t *volume, const struct rt_db_internal *ip)
     *volume = fabs(_vol);
 }
 
-const char *
+C_DECL const char *
 rt_vol_keypoint(point_t *pt, const char *keystr, const mat_t mat, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     if (!pt || !ip)

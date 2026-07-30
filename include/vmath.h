@@ -106,7 +106,9 @@
 #include "common.h"
 
 /* needed for additional math defines on Windows when including math.h */
-#define _USE_MATH_DEFINES 1
+#ifndef _USE_MATH_DEFINES
+#  define _USE_MATH_DEFINES 1
+#endif
 
 /* for sqrt(), sin(), cos(), rint(), M_PI, INFINITY (HUGE_VAL), and more */
 #include <math.h>
@@ -240,9 +242,6 @@ extern "C" {
 #    define SQRT_SMALL_FASTF	1.0e-39	/* This squared gives zero */
 #  endif
 #endif
-
-/** DEPRECATED, do not use */
-#define SMALL SQRT_SMALL_FASTF
 
 /**
  * It is necessary to have a representation of 1.0/0.0 or log(0),
@@ -1207,33 +1206,6 @@ typedef enum vmath_matrix_component_ {
 	} \
     } while (0)
 
-
-/**
- * @brief Combine together three vectors, all scaled by scalars.
- *
- * DEPRECATED: API inconsistent, use combo of other macros.
- */
-#define VCOMB3(o, a, b, c, d, e, f) do { \
-	(o)[X] = (a) * (b)[X] + (c) * (d)[X] + (e) * (f)[X]; \
-	(o)[Y] = (a) * (b)[Y] + (c) * (d)[Y] + (e) * (f)[Y]; \
-	(o)[Z] = (a) * (b)[Z] + (c) * (d)[Z] + (e) * (f)[Z]; \
-    } while (0)
-
-/**
- * @brief Combine together three vectors of length `n', all scaled by
- * scalars.
- *
- * DEPRECATED: API inconsistent, use combo of other macros.
- */
-#define VCOMB3N(o, a, b, c, d, e, f, n) do { \
-	size_t _vcomb3; \
-	for (_vcomb3 = 0; \
-	     _vcomb3 < (size_t)(n); \
-	     _vcomb3++) { \
-	    (o)[_vcomb3] = (a) * (b)[_vcomb3] + (c) * (d)[_vcomb3] + (e) * (f)[_vcomb3]; \
-	} \
-    } while (0)
-
 /**
  * @brief Combine together 2 vectors, both scaled by scalars.
  */
@@ -1254,15 +1226,6 @@ typedef enum vmath_matrix_component_ {
 	     _vcomb2++) { \
 	    (o)[_vcomb2] = (sa) * (va)[_vcomb2] + (sb) * (vb)[_vcomb2]; \
 	} \
-    } while (0)
-
-/**
- * DEPRECATED.
- */
-#define VJOIN4(a, b, c, d, e, f, g, h, i, j) do { \
-	(a)[X] = (b)[X] + (c)*(d)[X] + (e)*(f)[X] + (g)*(h)[X] + (i)*(j)[X]; \
-	(a)[Y] = (b)[Y] + (c)*(d)[Y] + (e)*(f)[Y] + (g)*(h)[Y] + (i)*(j)[Y]; \
-	(a)[Z] = (b)[Z] + (c)*(d)[Z] + (e)*(f)[Z] + (g)*(h)[Z] + (i)*(j)[Z]; \
     } while (0)
 
 /**

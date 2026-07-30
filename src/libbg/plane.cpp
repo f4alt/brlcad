@@ -33,6 +33,21 @@
 #include <stdio.h>
 #include <math.h>
 
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic push /* start new diagnostic pragma */
+#  pragma GCC diagnostic ignored "-Wfloat-equal"
+#elif defined(__clang__)
+#  pragma clang diagnostic push /* start ignoring warnings */
+#  pragma clang diagnostic ignored "-Wdocumentation"
+#  pragma clang diagnostic ignored "-Wfloat-equal"
+#endif
+#include <Eigen/SVD>
+#if defined(__GNUC__) && !defined(__clang__)
+#  pragma GCC diagnostic pop /* end ignoring warnings */
+#elif defined(__clang__)
+#  pragma clang diagnostic pop /* end ignoring warnings */
+#endif
+
 #include "bu/debug.h"
 #include "bu/log.h"
 #include "vmath.h"
@@ -42,6 +57,50 @@
 #include "bg/plane.h"
 
 #define UNIT_SQ_TOL 1.0e-13
+
+
+static int
+bg_make_pnt_3planes_svd(fastf_t *pt,
+			const fastf_t *a,
+			const fastf_t *b,
+			const fastf_t *c,
+			fastf_t aH,
+			fastf_t bH,
+			fastf_t cH)
+{
+    Eigen::Matrix<fastf_t, 3, 3> A;
+    Eigen::Matrix<fastf_t, 3, 1> rhs;
+    fastf_t max_sv = 0.0;
+    fastf_t min_sv = 0.0;
+    fastf_t residual_tol;
+
+    A << a[X], a[Y], a[Z],
+	 b[X], b[Y], b[Z],
+	 c[X], c[Y], c[Z];
+    rhs << aH, bH, cH;
+
+    Eigen::JacobiSVD<Eigen::Matrix<fastf_t, 3, 3>> svd(A, Eigen::ComputeFullU | Eigen::ComputeFullV);
+    max_sv = svd.singularValues()(0);
+    min_sv = svd.singularValues()(2);
+    if (!isfinite(max_sv) || !isfinite(min_sv) || max_sv <= SMALL_FASTF)
+	return -1;
+    if (min_sv <= max_sv * 1.0e-12)
+	return -1;
+
+    Eigen::Matrix<fastf_t, 3, 1> sol = svd.solve(rhs);
+    if (!isfinite(sol(0)) || !isfinite(sol(1)) || !isfinite(sol(2)))
+	return -1;
+
+    pt[X] = sol(0);
+    pt[Y] = sol(1);
+    pt[Z] = sol(2);
+
+    residual_tol = 1.0e-9 * (fabs(aH) + fabs(bH) + fabs(cH) + 1.0);
+    if ((A * sol - rhs).norm() > residual_tol)
+	return -1;
+
+    return 0;
+}
 
 #if defined(HAVE_NEXTAFTER) && !defined(HAVE_DECL_NEXTAFTER) && !defined(__cplusplus)
 extern double nextafter(double x, double y);
@@ -238,6 +297,30 @@ bg_make_pnt_3planes(fastf_t *pt, const fastf_t *a, const fastf_t *b, const fastf
 {
     vect_t v1;
     fastf_t dot;
+    fastf_t amag, bmag, cmag;
+    fastf_t det_tol;
+
+    if (!pt || !a || !b || !c)
+	return -1;
+
+    if (!isfinite(a[X]) || !isfinite(a[Y]) || !isfinite(a[Z]) || !isfinite(a[H]) ||
+	!isfinite(b[X]) || !isfinite(b[Y]) || !isfinite(b[Z]) || !isfinite(b[H]) ||
+	!isfinite(c[X]) || !isfinite(c[Y]) || !isfinite(c[Z]) || !isfinite(c[H]))
+	return -1;
+
+    amag = MAGNITUDE(a);
+    bmag = MAGNITUDE(b);
+    cmag = MAGNITUDE(c);
+    if (amag <= SMALL_FASTF || bmag <= SMALL_FASTF || cmag <= SMALL_FASTF)
+	return -1;
+
+    /* Since this algorithm assumes unit-length direction vectors, we need
+     * to calculate the scale factors associated with the unitized
+     * equivalents of the planes.
+     */
+    fastf_t aH = amag * a[H];
+    fastf_t bH = bmag * b[H];
+    fastf_t cH = cmag * c[H];
 
     /* Find a vector perpendicular to vectors b and c (parallel to planes B
      * and C).
@@ -253,22 +336,16 @@ bg_make_pnt_3planes(fastf_t *pt, const fastf_t *a, const fastf_t *b, const fastf
      */
     dot = VDOT(a, v1);
 
-    if (ZERO(dot)) {
-	return -1;
+    det_tol = 1.0e-10 * amag * bmag * cmag;
+    if (fabs(dot) <= det_tol) {
+	return bg_make_pnt_3planes_svd(pt, a, b, c, aH, bH, cH);
     } else {
 	vect_t v2, v3;
-	fastf_t det, aH, bH, cH;
+	fastf_t det;
+	fastf_t residual_tol;
 
 	VCROSS(v2, a, c);
 	VCROSS(v3, a, b);
-
-	/* Since this algorithm assumes unit-length direction vectors, we need
-	 * to calculate the scale factors associated with the unitized
-	 * equivalents of the planes.
-	 */
-	aH = MAGNITUDE(a) * a[H];
-	bH = MAGNITUDE(b) * b[H];
-	cH = MAGNITUDE(c) * c[H];
 
 	/* We use the fact that det(M) = 1 / det(M^T) to calculate the
 	 * determinant of matrix M:
@@ -281,6 +358,15 @@ bg_make_pnt_3planes(fastf_t *pt, const fastf_t *a, const fastf_t *b, const fastf
 	pt[X] = det * (aH * v1[X] - bH * v2[X] + cH * v3[X]);
 	pt[Y] = det * (aH * v1[Y] - bH * v2[Y] + cH * v3[Y]);
 	pt[Z] = det * (aH * v1[Z] - bH * v2[Z] + cH * v3[Z]);
+
+	if (!isfinite(pt[X]) || !isfinite(pt[Y]) || !isfinite(pt[Z]))
+	    return bg_make_pnt_3planes_svd(pt, a, b, c, aH, bH, cH);
+
+	residual_tol = 1.0e-9 * (fabs(aH) + fabs(bH) + fabs(cH) + 1.0);
+	if (fabs(VDOT(pt, a) - aH) > residual_tol ||
+	    fabs(VDOT(pt, b) - bH) > residual_tol ||
+	    fabs(VDOT(pt, c) - cH) > residual_tol)
+	    return bg_make_pnt_3planes_svd(pt, a, b, c, aH, bH, cH);
     }
     return 0;
 }
@@ -2379,7 +2465,7 @@ min = (%g, %g, %g), max = (%g, %g, %g), half_eqn = (%g, %g, %g, %g)\n",
 
 
 int
-bg_distsq_line3_line3(fastf_t *dist, fastf_t *P, fastf_t *d_in, fastf_t *Q, fastf_t *e_in, fastf_t *pt1, fastf_t *pt2)
+bg_distsq_line3_line3(fastf_t *dist, const fastf_t *P, const fastf_t *d_in, const fastf_t *Q, const fastf_t *e_in, fastf_t *pt1, fastf_t *pt2)
 {
     fastf_t de, denom;
     vect_t diff, PmQ, tmp;

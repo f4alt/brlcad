@@ -360,7 +360,8 @@ GED_EXPORT extern int _ged_do_tra(struct ged *gedp,
  * the real definition of the struct goes here.  The public
  * header has only the notion of a ged_results structure.*/
 struct ged_results {
-	struct bu_ptbl *results_tbl;
+    int ret;
+    struct bu_ptbl *results_tbl;
 };
 
 /* defined in ged_util.c */
@@ -428,9 +429,6 @@ _ged_characterize_path_spec(struct bu_vls *normalized,
  */
 GED_EXPORT extern void _ged_cmd_help(struct ged *gedp, const char *usage, struct bu_opt_desc *d);
 
-/* Option for verbosity variable setting */
-GED_EXPORT extern int _ged_vopt(struct bu_vls *msg, size_t argc, const char **argv, void *set_var);
-
 /* Function to read in density information, either from a file or from the
  * database itself. Implements the following priority order:
  *
@@ -460,6 +458,8 @@ _ged_sort_existing_objs(struct db_i *dbip, int argc, const char *argv[], struct 
 
 
 GED_EXPORT extern int ged_view_data_lines(struct ged *gedp, int argc, const char *argv[]);
+
+GED_EXPORT extern int ged_repair(struct ged *gedp, int argc, const char **argv);
 
 
 GED_EXPORT extern void ged_push_scene_obj(struct ged *gedp, struct bv_scene_obj *sp);

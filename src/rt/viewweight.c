@@ -52,15 +52,13 @@
 #include "./ext.h"
 
 
-extern struct resource resource[];
-
 /* Viewing module specific "set" variables */
 struct bu_structparse view_parse[] = {
     {"",	0, (char *)0,	0,	BU_STRUCTPARSE_FUNC_NULL, NULL, NULL}
 };
 
 
-const char title[] = "RT Weight";
+EXTERNCPP const char title[] = "RT Weight";
 
 int noverlaps = 0;
 FILE *densityfp;
@@ -78,15 +76,6 @@ struct datapoint {
 };
 
 
-extern int rpt_overlap;     	/* report region verbosely */
-extern fastf_t cell_width;      /* model space grid cell width */
-extern fastf_t cell_height;     /* model space grid cell height */
-extern FILE *outfp;          	/* optional output file */
-extern char *outputfile;     	/* name of base of output file */
-extern const char *densityfile;
-extern int output_is_binary;	/* !0 means output is binary */
-
-
 int
 densities_prep(struct rt_i * rtip, int minus_o)
 {
@@ -94,6 +83,7 @@ densities_prep(struct rt_i * rtip, int minus_o)
     struct bu_mapped_file *dfile = NULL;
     char *dbuff = NULL;
     int found_densities = 0;
+    int next_available_id = 0;
 
     if (!minus_o) {
 	outfp = stdout;
@@ -209,7 +199,7 @@ densities_prep(struct rt_i * rtip, int minus_o)
     }
 
     // iterate through the db and find all materials
-    int next_available_id = MAX_MATERIAL_ID - 1;
+    next_available_id = MAX_MATERIAL_ID - 1;
     {
 	struct directory *dp;
 	FOR_ALL_DIRECTORY_START(dp, rtip->rti_dbip)
@@ -358,7 +348,7 @@ densities_prep_rtweight_fail:
 
 
 static int
-hit(struct application *ap, struct partition *PartHeadp, struct seg *UNUSED(segp))
+r_hit(struct application *ap, struct partition *PartHeadp, struct seg *UNUSED(segp))
 {
     struct partition *pp;
     register struct xray *rp = &ap->a_ray;
@@ -431,7 +421,7 @@ hit(struct application *ap, struct partition *PartHeadp, struct seg *UNUSED(segp
 
 
 static int
-miss(register struct application *UNUSED(ap))
+r_miss(register struct application *UNUSED(ap))
 {
     return 0;
 }
@@ -459,8 +449,8 @@ view_init(struct application *ap, char *UNUSED(file), char *UNUSED(obj), int min
 	bu_exit(-1, NULL);
     }
 
-    ap->a_hit = hit;
-    ap->a_miss = miss;
+    ap->a_hit = r_hit;
+    ap->a_miss = r_miss;
     ap->a_overlap = overlap;
     ap->a_onehit = 0;
 
@@ -747,9 +737,17 @@ view_end(struct application *ap)
     }
 
     volume *= (dbp->dbi_base2local*dbp->dbi_base2local*dbp->dbi_base2local);
-    sum_x *= (conversion / total_weight) * dbp->dbi_base2local;
-    sum_y *= (conversion / total_weight) * dbp->dbi_base2local;
-    sum_z *= (conversion / total_weight) * dbp->dbi_base2local;
+    if (ZERO(total_weight)) {
+	/* No mass was accumulated (e.g. all densities are zero), so the
+	 * mass-weighted centroid is undefined.  Report a zero centroid
+	 * rather than dividing by zero and printing nan,nan,nan.
+	 */
+	sum_x = sum_y = sum_z = 0.0;
+    } else {
+	sum_x *= (conversion / total_weight) * dbp->dbi_base2local;
+	sum_y *= (conversion / total_weight) * dbp->dbi_base2local;
+	sum_z *= (conversion / total_weight) * dbp->dbi_base2local;
+    }
 
     fprintf(outfp, "RT Weight Program Output:\n");
     fprintf(outfp, "\nDatabase Title: \"%s\"\n", dbp->dbi_title);
@@ -778,7 +776,7 @@ view_cleanup(struct rt_i *UNUSED(rtip))
 }
 
 
-void
+C_DECL void
 application_init(void)
 {
     option("", "-o file.out", "Weights and Moments output file", 0);

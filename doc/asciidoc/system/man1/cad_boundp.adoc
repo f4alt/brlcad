@@ -4,75 +4,118 @@
 :manmanual: BRL-CAD
 
 == NAME
-cad_boundp - find bounding polygon of two-dimensional view
+cad_boundp - find bounding polygon of a two-dimensional view
 
 == SYNOPSIS
 
 [source]
 ----
-cad_boundp [ -i input] [ -o output] [ -t tolerance] [-v]
+cad_boundp [-i _input_] [-o _output_] [-t _tolerance_] [-v]
 ----
 
 
 [[description]]
 == DESCRIPTION
 
-*cad_boundp* reads from _input_ (standard input if not specified) a series of line segment endpoint (_x_,_y_) coordinate values describing a two-dimensional view of the edges of a (possibly transparent) three-dimensional object and writes to _output_ (standard output if not specified) the (_x_,_y_) coordinates of vertices of the bounding polygon in counter-clockwise order, starting with the vertex having the smallest _y_ coordinate. If the *-v* argument is used, instead of points the output will consist of line segment data suitable for input into another invocation of *cad_boundp* .
+*cad_boundp* reads a set of 2D line segments, one per input line as four
+whitespace-separated numbers (_x1 y1 x2 y2_), and computes the bounding polygon
+of the region they outline. The segments typically describe a two-dimensional
+view of the edges of a 3D object. Intersecting segments are split so that every
+polygon vertex falls on a segment endpoint, and the perimeter is then traced
+counter-clockwise starting from the vertex with the smallest _y_ coordinate.
 
-Input lines not beginning with a number are silently skipped. This feature can be used to accommodate comments or additional control information in the data stream.
+By default each polygon vertex is written as an _x y_ pair. Input lines that do
+not begin with a number (such as comments or color records) are silently
+skipped, so segment data may be interleaved with other annotations.
 
-When a _tolerance_ is specified, a point is considered to be identical to a previously-input point if its _x_ and _y_ coordinates are both within _tolerance_ of the first point encountered within a group passing the tolerance test. Otherwise, point coordinates must match precisely or the algorithm will produce erroneous results.
+
+[[options]]
+== OPTIONS
+
+*-i* _input_::
+  Read segment data from _input_ instead of standard input. A value of *-* also
+  selects standard input.
+
+*-o* _output_::
+  Write results to _output_ instead of standard output. A value of *-* also
+  selects standard output.
+
+*-t* _tolerance_::
+  Treat two points as identical when the distance between them does not exceed
+  _tolerance_ (default 0, requiring an exact match). A tolerance that is too
+  tight, or incomplete input, may yield a degenerate or smaller-than-expected
+  polygon; specifying double the expected tolerance is often prudent.
+
+*-v*::
+  Emit the result as line segments (_x1 y1 x2 y2_ pairs of consecutive
+  vertices, including the closing edge) rather than as vertex points. This form
+  can be fed back into another invocation of *cad_boundp*.
+
+*-h*, *-?*::
+  Print a usage message and exit.
 
 
 [[restrictions]]
 == RESTRICTIONS
 
-*cad_boundp* may output a polygon smaller than desired or produce a "degenerate input" message if the _tolerance_ is too tight or if input is incomplete. It may be wise to specify double the expected _tolerance_.
-
-Holes within the view cannot be recognized.
-
-Silhouette thickness must everywhere exceed _tolerance_ (no narrow necking-down) or a portion of the silhouette will be "lost"; in particular, the view should not consist of disjoint parts.
-
-
-[[example]]
-== EXAMPLE
+Holes within the view cannot be recognized. The silhouette thickness must
+everywhere exceed _tolerance_ (no narrow necking-down) or part of the
+silhouette will be lost; in particular the view should not consist of disjoint
+parts.
 
 
-[quote]
-____
-$ cad_boundp -t 0.1# _comment_ 0 2 0 1 3 2 3 1 2 0 1 0 0 2 3 2 0 2 3 1 0 1 3 2 2 2 2 0 1 0 1 2 2 2 1 2 0 1 3 1 _^D_ 1 0 2 0 2 1 3 1 3 2 2 2 1 2 0 2 0 1 1 1
+[[examples]]
+== EXAMPLES
 
-____
+.Tracing the outline of a unit square
+====
+[source,bash]
+----
+$ cat square.txt
+# bottom, right, top, and left edges
+0.0 0.0 1.0 0.0
+1.0 0.0 1.0 1.0
+1.0 1.0 0.0 1.0
+0.0 1.0 0.0 0.0
 
-
-[[see_also]]
-== SEE ALSO
-
-*cad_parea*(1)
+$ cad_boundp -t 0.01 -i square.txt
+0 0
+1 0
+1 1
+0 1
+----
+The four edges are reduced to the bounding polygon's vertices, listed
+counter-clockwise from the lowest point. Re-running with *-v* would instead
+print the closed loop of edge segments, suitable for piping into another
+*cad_boundp* or plotting tool.
+====
 
 
 [[diagnostics]]
 == DIAGNOSTICS
 
-Any error condition causes *cad_boundp* to terminate with non-zero exit status after it prints an error message on the standard error output.
+Any error condition causes *cad_boundp* to terminate with non-zero exit status
+after printing a message on standard error. Improperly formatted input produces
+a "bad input" message. A perimeter vertex with only one segment attached yields
+"degenerate input". Exhausting available memory yields "out of memory".
 
-An illegal argument or improperly formatted input produces an appropriate message.
 
-If a vertex having only one line segment connected to it is found on the perimeter, *cad_boundp* produces the message "degenerate input".
+[[see_also]]
+== SEE ALSO
 
-If there is too much data for *cad_boundp* to handle, the message "out of memory" is produced.
+*brlcad*(1), *cad_parea*(1)
 
 
 [[author]]
 == AUTHOR
 
-Douglas A. Gwyn, BRL/VLD-VMB
+BRL-CAD Team
 
 
 [[copyright]]
 == COPYRIGHT
 
-This software is Copyright (c) 1991-2026 by the United States Government as represented by U.S. Army Research Laboratory.
+This software is Copyright (c) 1989-2026 by the United States Government as represented by U.S. Army Research Laboratory.
 
 
 [[bug_reports]]

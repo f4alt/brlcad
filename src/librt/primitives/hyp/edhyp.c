@@ -42,7 +42,7 @@
 #define ECMD_HYP_SCALE_B	38129
 #define ECMD_HYP_C		38130
 
-void
+C_DECL void
 rt_edit_hyp_set_edit_mode(struct rt_edit *s, int mode)
 {
     rt_edit_set_edflag(s, mode);
@@ -86,7 +86,7 @@ struct rt_edit_menu_item  hyp_menu[] = {
     { "", NULL, 0 }
 };
 
-struct rt_edit_menu_item *
+C_DECL struct rt_edit_menu_item *
 rt_edit_hyp_menu_item(const struct bn_tol *UNUSED(tol))
 {
     return hyp_menu;
@@ -110,19 +110,27 @@ static const struct rt_edit_param_desc hyp_c_params[] = {
     { "c", "Neck Ratio c (0..1)", RT_EDIT_PARAM_SCALAR, 0, 1e-10, 1.0,
       "fraction", 0, NULL, NULL, NULL }
 };
+static const struct rt_edit_param_desc hyp_rot_deg_params[] = {
+    { "rot_xyz", "Rotation X Y Z (deg)", RT_EDIT_PARAM_VECTOR, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT,
+      "degrees", 0, NULL, NULL, NULL }
+};
 
 static const struct rt_edit_cmd_desc hyp_cmds[] = {
-    { ECMD_HYP_H,       "Set H",  "geometry", 1, hyp_h_params, 1, 10 },
-    { ECMD_HYP_SCALE_A, "Set A",  "geometry", 1, hyp_a_params, 1, 20 },
-    { ECMD_HYP_SCALE_B, "Set B",  "geometry", 1, hyp_b_params, 1, 30 },
-    { ECMD_HYP_C,       "Set c",  "geometry", 1, hyp_c_params, 1, 40 },
+    { ECMD_HYP_H,       "Set H",    "geometry", 1, hyp_h_params,       1, 10, NULL },
+    { ECMD_HYP_SCALE_A, "Set A",    "geometry", 1, hyp_a_params,       1, 20, NULL },
+    { ECMD_HYP_SCALE_B, "Set B",    "geometry", 1, hyp_b_params,       1, 30, NULL },
+    { ECMD_HYP_C,       "Set c",    "geometry", 1, hyp_c_params,       1, 40, NULL },
+    { ECMD_HYP_ROT_H,   "Rotate H", "rotation", 1, hyp_rot_deg_params, 1, 50, NULL }
 };
 
 static const struct rt_edit_prim_desc hyp_prim_desc = {
-    "hyp", "Hyperboloid of One Sheet", 4, hyp_cmds
+    "hyp", "Hyperboloid of One Sheet", 5, hyp_cmds,
+    0,                    /* nopt         */
+    NULL                  /* opts         */
 };
 
-const struct rt_edit_prim_desc *
+C_DECL const struct rt_edit_prim_desc *
 rt_edit_hyp_edit_desc(void)
 {
     return &hyp_prim_desc;
@@ -130,7 +138,7 @@ rt_edit_hyp_edit_desc(void)
 
 #define V3BASE2LOCAL(_pt) (_pt)[X]*base2local, (_pt)[Y]*base2local, (_pt)[Z]*base2local
 
-void
+C_DECL void
 rt_edit_hyp_write_params(
 	struct bu_vls *p,
        	const struct rt_db_internal *ip,
@@ -157,7 +165,7 @@ rt_edit_hyp_write_params(
     if (ln) *ln = '\0'; \
     while (lc && strchr(lc, ':')) lc++
 
-int
+C_DECL int
 rt_edit_hyp_read_params(
 	struct rt_db_internal *ip,
 	const char *fc,
@@ -406,7 +414,7 @@ rt_edit_hyp_pscale(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_hyp_edit(struct rt_edit *s)
 {
     switch (s->edit_flag) {
@@ -422,7 +430,7 @@ rt_edit_hyp_edit(struct rt_edit *s)
     }
 }
 
-int
+C_DECL int
 rt_edit_hyp_edit_xy(
         struct rt_edit *s,
         const vect_t mousevec

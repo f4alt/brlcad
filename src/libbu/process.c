@@ -28,6 +28,16 @@
 #include <sys/types.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
+#ifdef HAVE_POLL_H
+#  include <poll.h>
+#endif
+#ifdef HAVE_SYS_SELECT_H
+#  include <sys/select.h>
+#endif
+#ifdef HAVE_SYS_TIME_H
+#  include <sys/time.h>
+#endif
 #include "bio.h"
 #include "bnetwork.h"
 #include "bu/debug.h"
@@ -93,33 +103,85 @@ struct bu_process {
 };
 
 
+static void
+process_func_info_reset(struct bu_process_func_info *info)
+{
+    if (!info)
+	return;
+
+    info->exit_code = -1;
+    info->signaled = 0;
+    info->signal_num = 0;
+    info->timed_out = 0;
+}
+
+
+#ifndef _WIN32
+static void
+process_func_capture(int *fd, struct bu_vls *vls)
+{
+    char buff[1024] = {0};
+
+    if (!fd || *fd < 0)
+	return;
+
+    while (*fd >= 0) {
+	int ret = read(*fd, buff, sizeof(buff));
+	if (ret > 0) {
+	    if (vls)
+		bu_vls_strncat(vls, buff, (size_t)ret);
+	    if (!bu_process_pending(*fd))
+		return;
+	    continue;
+	}
+
+	if (ret < 0 && (errno == EINTR || errno == EAGAIN))
+	    return;
+
+	close(*fd);
+	*fd = -1;
+	return;
+    }
+}
+#endif
+
+
 void
 bu_process_file_close(struct bu_process *pinfo, bu_process_io_t d)
 {
     if (!pinfo)
 	return;
 
+    FILE *fp = NULL;
     if (d == BU_PROCESS_STDIN) {
-	if (!pinfo->fp_in)
-	    return;
-	(void)fclose(pinfo->fp_in);
-	pinfo->fp_in = NULL;
-	return;
+	fp = pinfo->fp_in;
     }
     if (d == BU_PROCESS_STDOUT) {
-	if (!pinfo->fp_out)
-	    return;
-	(void)fclose(pinfo->fp_out);
-	pinfo->fp_out = NULL;
-	return;
+	fp = pinfo->fp_out;
     }
     if (d == BU_PROCESS_STDERR) {
-	if (!pinfo->fp_err)
-	    return;
-	(void)fclose(pinfo->fp_err);
-	pinfo->fp_err = NULL;
-	return;
+	fp = pinfo->fp_err;
     }
+    if (!fp)
+	return;
+
+    int fd = fileno(fp);
+    if (pinfo->fp_in == fp)
+	pinfo->fp_in = NULL;
+    if (pinfo->fp_out == fp)
+	pinfo->fp_out = NULL;
+    if (pinfo->fp_err == fp)
+	pinfo->fp_err = NULL;
+    (void)fclose(fp);
+
+    /* OUT_EQ_ERR aliases stdout and stderr.  Invalidate every matching
+     * descriptor so neither wait nor another stream wrapper closes it twice. */
+    if (pinfo->fd_in == fd)
+	pinfo->fd_in = -1;
+    if (pinfo->fd_out == fd)
+	pinfo->fd_out = -1;
+    if (pinfo->fd_err == fd)
+	pinfo->fd_err = -1;
 }
 
 void
@@ -134,17 +196,29 @@ bu_process_file_open(struct bu_process *pinfo, bu_process_io_t d)
     if (!pinfo)
 	return NULL;
 
-    bu_process_file_close(pinfo, d);
-
     if (d == BU_PROCESS_STDIN) {
+	if (pinfo->fp_in)
+	    return pinfo->fp_in;
 	pinfo->fp_in = fdopen(pinfo->fd_in, "wb");
 	return pinfo->fp_in;
     }
     if (d == BU_PROCESS_STDOUT) {
+	if (pinfo->fp_out)
+	    return pinfo->fp_out;
+	if (pinfo->fd_out == pinfo->fd_err && pinfo->fp_err) {
+	    pinfo->fp_out = pinfo->fp_err;
+	    return pinfo->fp_out;
+	}
 	pinfo->fp_out = fdopen(pinfo->fd_out, "rb");
 	return pinfo->fp_out;
     }
     if (d == BU_PROCESS_STDERR) {
+	if (pinfo->fp_err)
+	    return pinfo->fp_err;
+	if (pinfo->fd_err == pinfo->fd_out && pinfo->fp_out) {
+	    pinfo->fp_err = pinfo->fp_out;
+	    return pinfo->fp_err;
+	}
 	pinfo->fp_err = fdopen(pinfo->fd_err, "rb");
 	return pinfo->fp_err;
     }
@@ -348,6 +422,10 @@ bu_process_create(struct bu_process **pinfo, const char **argv, int opts)
 	_exit(16);
     }
 
+    /* Set the child's process group from both sides of fork so it is ready
+     * before an immediate timeout attempts group-directed termination. */
+    (void)setpgid((pid_t)pid, (pid_t)pid);
+
     (void)close(pipe_in[0]);
     (void)close(pipe_out[1]);
     (void)close(pipe_err[1]);
@@ -499,22 +577,221 @@ bu_process_exec(struct bu_process **p, const char *cmd, int argc, const char **a
     if (out_eql_err) opts |= BU_PROCESS_OUT_EQ_ERR;
     if (hide_window) opts |= BU_PROCESS_HIDE_WINDOW;
 
-    bu_process_create(p, av, (bu_process_create_opts)opts);
+    bu_process_create(p, av, (bu_process_opts)opts);
+}
+
+
+int
+bu_process_func(struct bu_process_func_info *info, bu_process_func_t func, void *data, int timeout_ms, int flags)
+{
+    if (!func)
+	return -1;
+
+    struct bu_process_func_info local_info = {-1, 0, 0, 0, NULL, NULL};
+    struct bu_vls *out = NULL;
+    struct bu_vls *err = NULL;
+
+    if (!info)
+	info = &local_info;
+
+    process_func_info_reset(info);
+    out = info->out;
+    err = info->err;
+
+    if (out)
+	bu_vls_trunc(out, 0);
+    if (err && err != out)
+	bu_vls_trunc(err, 0);
+
+#ifndef _WIN32
+    int merged_err = (flags & BU_PROCESS_OUT_EQ_ERR);
+    int pipe_out[2] = {-1, -1};
+    int pipe_err[2] = {-1, -1};
+    int fd_out = -1;
+    int fd_err = -1;
+    int status = 0;
+    int child_done = 0;
+    int pid = -1;
+    struct bu_vls *capture_out = out;
+    struct bu_vls *capture_err = err;
+    int64_t start_time = bu_gettime();
+    int64_t timeout_usec = (timeout_ms > 0) ? ((int64_t)timeout_ms * 1000) : 0;
+
+    if (merged_err) {
+	capture_out = out ? out : err;
+	capture_err = NULL;
+    }
+
+    if (capture_out && pipe(pipe_out) < 0)
+	goto process_func_fail;
+    if (capture_err && pipe(pipe_err) < 0)
+	goto process_func_fail;
+
+    fflush(NULL);
+    pid = fork();
+    if (pid < 0)
+	goto process_func_fail;
+
+    if (pid == 0) {
+	int ret = 0;
+
+	setpgid(0, 0);
+
+	if (capture_out) {
+	    close(pipe_out[0]);
+	    if (dup2(pipe_out[1], BU_PROCESS_STDOUT) < 0)
+		_exit(16);
+	}
+	if (capture_err) {
+	    close(pipe_err[0]);
+	    if (dup2(pipe_err[1], BU_PROCESS_STDERR) < 0)
+		_exit(16);
+	} else if (merged_err && capture_out) {
+	    if (dup2(pipe_out[1], BU_PROCESS_STDERR) < 0)
+		_exit(16);
+	}
+
+	if (capture_out)
+	    close(pipe_out[1]);
+	if (capture_err)
+	    close(pipe_err[1]);
+
+	ret = func(data);
+	fflush(NULL);
+	_exit(ret);
+    }
+
+    /* Avoid racing the child's setpgid call if the timeout is very short. */
+    (void)setpgid((pid_t)pid, (pid_t)pid);
+
+    if (capture_out) {
+	close(pipe_out[1]);
+	fd_out = pipe_out[0];
+	pipe_out[0] = -1;
+	pipe_out[1] = -1;
+    }
+    if (capture_err) {
+	close(pipe_err[1]);
+	fd_err = pipe_err[0];
+	pipe_err[0] = -1;
+	pipe_err[1] = -1;
+    }
+
+    while (!child_done || fd_out >= 0 || fd_err >= 0) {
+	if (!child_done) {
+	    int wret = waitpid((pid_t)pid, &status, WNOHANG);
+	    if (wret == pid) {
+		child_done = 1;
+	    } else if (wret < 0) {
+		goto process_func_fail;
+	    } else if (timeout_usec > 0 && (bu_gettime() - start_time) > timeout_usec) {
+		info->timed_out = 1;
+		(void)bu_pid_terminate(pid);
+		if (waitpid((pid_t)pid, &status, 0) == pid)
+		    child_done = 1;
+	    }
+	}
+
+	if (fd_out < 0 && fd_err < 0) {
+	    if (!child_done) {
+		struct timeval tv = {0, 10000};
+		(void)select(0, NULL, NULL, NULL, &tv);
+	    }
+	    continue;
+	}
+
+	fd_set read_set;
+	int maxfd = -1;
+	int sret = 0;
+	struct timeval tv = {0, 10000};
+
+	FD_ZERO(&read_set);
+	if (fd_out >= 0) {
+	    FD_SET(fd_out, &read_set);
+	    maxfd = fd_out;
+	}
+	if (fd_err >= 0) {
+	    FD_SET(fd_err, &read_set);
+	    if (fd_err > maxfd)
+		maxfd = fd_err;
+	}
+
+	sret = select(maxfd + 1, &read_set, NULL, NULL, &tv);
+	if (sret < 0) {
+	    if (errno == EINTR)
+		continue;
+	    goto process_func_fail;
+	}
+	if (sret == 0)
+	    continue;
+
+	if (fd_out >= 0 && FD_ISSET(fd_out, &read_set))
+	    process_func_capture(&fd_out, capture_out);
+	if (fd_err >= 0 && FD_ISSET(fd_err, &read_set))
+	    process_func_capture(&fd_err, capture_err);
+    }
+
+    if (WIFEXITED(status)) {
+	info->exit_code = WEXITSTATUS(status);
+	return info->exit_code;
+    }
+
+    if (WIFSIGNALED(status)) {
+	info->signaled = 1;
+	info->signal_num = WTERMSIG(status);
+	return ERROR_PROCESS_ABORTED;
+    }
+
+    return -1;
+
+process_func_fail:
+    if (pipe_out[0] >= 0) close(pipe_out[0]);
+    if (pipe_out[1] >= 0) close(pipe_out[1]);
+    if (pipe_err[0] >= 0) close(pipe_err[0]);
+    if (pipe_err[1] >= 0) close(pipe_err[1]);
+    if (fd_out >= 0) close(fd_out);
+    if (fd_err >= 0) close(fd_err);
+    if (pid > 0) {
+	(void)bu_pid_terminate(pid);
+	(void)waitpid((pid_t)pid, &status, 0);
+    }
+    return -1;
+#else
+    (void)data;
+    (void)timeout_ms;
+    (void)flags;
+    return -1;
+#endif
 }
 
 int
 bu_process_wait_n(struct bu_process **pinfo, int wtime)
 {
-    if (!pinfo)
+    if (!pinfo || !*pinfo)
 	return -1;
 
+    struct bu_process *process = *pinfo;
     int rc = 0;
+
+    /* A FILE owns its descriptor, so close streams first.  Close any
+     * remaining raw descriptors exactly once and invalidate all aliases. */
+    bu_process_file_close(process, BU_PROCESS_STDIN);
+    bu_process_file_close(process, BU_PROCESS_STDOUT);
+    bu_process_file_close(process, BU_PROCESS_STDERR);
+    int *fds[3] = {&process->fd_in, &process->fd_out, &process->fd_err};
+    for (size_t i = 0; i < 3; i++) {
+	int fd = *fds[i];
+	if (fd < 0)
+	    continue;
+	(void)close(fd);
+	for (size_t j = i; j < 3; j++) {
+	    if (*fds[j] == fd)
+		*fds[j] = -1;
+	}
+    }
+
 #ifndef _WIN32
     int retcode = 0;
-
-    close((*pinfo)->fd_in);
-    close((*pinfo)->fd_out);
-    close((*pinfo)->fd_err);
 
     if (kill((pid_t)(*pinfo)->pid, 0) == 0) {      // make sure the process exists
 	/* wait for process to end, or timeout */
@@ -530,6 +807,9 @@ bu_process_wait_n(struct bu_process **pinfo, int wtime)
 	if (rpid == -1 || rpid == 0) {
 		/* timed-out */
 		bu_pid_terminate((*pinfo)->pid);
+		/* Reap the direct child before releasing its process record. */
+		while (waitpid((pid_t)(*pinfo)->pid, &retcode, 0) == -1 && errno == EINTR)
+		    ;
 		rc = 0;	// process concluded, albeit forcibly
 	} else {
 		if (WIFEXITED(retcode))		    // normal exit
@@ -559,8 +839,20 @@ bu_process_wait_n(struct bu_process **pinfo, int wtime)
 	    rc = ERROR_PROCESS_ABORTED;
 	} else if (retcode == STILL_ACTIVE) {
 	    /* timed out */
-	    bu_pid_terminate((*pinfo)->pid);
-	    rc = 0;
+	    /* Preserve process-tree cleanup, then wait for the original child to
+	     * signal before releasing its handle.  Otherwise descendants may
+	     * survive with inherited stdout/stderr handles and keep a test runner
+	     * waiting for EOF. */
+	    (void)bu_pid_terminate((*pinfo)->pid);
+	    if (WaitForSingleObject((*pinfo)->hProcess, 5000) == WAIT_OBJECT_0) {
+		rc = 0;
+	    } else if (TerminateProcess((*pinfo)->hProcess,
+		    BU_MSVC_ABORT_EXIT)) {
+		(void)WaitForSingleObject((*pinfo)->hProcess, INFINITE);
+		rc = 0;
+	    } else {
+		rc = -1;
+	    }
 	} else {
 	    rc = (int)retcode;
 	}
@@ -570,10 +862,6 @@ bu_process_wait_n(struct bu_process **pinfo, int wtime)
 
     CloseHandle((*pinfo)->hProcess);
 #endif
-    /* Clean up */
-    bu_process_file_close((*pinfo), BU_PROCESS_STDOUT);
-    bu_process_file_close((*pinfo), BU_PROCESS_STDERR);
-
     /* Free copy of exec args */
     bu_free((void *)(*pinfo)->cmd, "pinfo cmd copy");
 
@@ -584,6 +872,7 @@ bu_process_wait_n(struct bu_process **pinfo, int wtime)
 	bu_free((void *)(*pinfo)->argv, "pinfo argv array");
     }
     BU_PUT(*pinfo, struct bu_process);
+    *pinfo = NULL;
 
     return rc;
 }
@@ -598,18 +887,6 @@ bu_process_wait(int *aborted, struct bu_process *pinfo, int wtime)
 
     return wait_ret;
 }
-
-
-#include <time.h>
-#ifdef HAVE_POLL_H
-#  include <poll.h>
-#endif
-#ifdef HAVE_SYS_SELECT_H
-#  include <sys/select.h>
-#endif
-#ifdef HAVE_SYS_TIME_H
-#  include <sys/time.h>
-#endif
 
 int
 bu_process_pending(int fd)

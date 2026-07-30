@@ -73,7 +73,7 @@ struct rt_ars_edit {
 };
 
 
-void *
+C_DECL void *
 rt_edit_ars_prim_edit_create(struct rt_edit *UNUSED(s))
 {
     struct rt_ars_edit *e;
@@ -86,7 +86,7 @@ rt_edit_ars_prim_edit_create(struct rt_edit *UNUSED(s))
     return (void *)e;
 }
 
-void
+C_DECL void
 rt_edit_ars_prim_edit_destroy(struct rt_ars_edit *e)
 {
     if (!e)
@@ -134,7 +134,7 @@ find_ars_nearest_pnt(
     *col = closest_j;
 }
 
-void
+C_DECL void
 rt_edit_ars_set_edit_mode(struct rt_edit *s, int mode)
 {
     rt_edit_set_edflag(s, mode);
@@ -197,7 +197,52 @@ struct rt_edit_menu_item ars_menu[] = {
     { "", NULL, 0 }
 };
 
-void
+static const struct rt_edit_param_desc ars_point_param[] = {
+    { "point", "Point", RT_EDIT_PARAM_POINT, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "length", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc ars_delta_param[] = {
+    { "delta", "Delta", RT_EDIT_PARAM_VECTOR, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "length", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc ars_scale_param[] = {
+    { "scale", "Scale", RT_EDIT_PARAM_SCALAR, 0,
+      0.0, RT_EDIT_PARAM_NO_LIMIT, "none", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_cmd_desc ars_cmds[] = {
+    { ECMD_ARS_PICK,       "Pick Vertex",   "selection", 1, ars_point_param, 1, 10, NULL },
+    { ECMD_ARS_NEXT_PT,    "Next Vertex",   "selection", 0, NULL,            0, 20, NULL },
+    { ECMD_ARS_PREV_PT,    "Prev Vertex",   "selection", 0, NULL,            0, 30, NULL },
+    { ECMD_ARS_NEXT_CRV,   "Next Curve",    "selection", 0, NULL,            0, 40, NULL },
+    { ECMD_ARS_PREV_CRV,   "Prev Curve",    "selection", 0, NULL,            0, 50, NULL },
+    { ECMD_ARS_MOVE_PT,    "Move Point",    "movement",  1, ars_delta_param, 1, 60, NULL },
+    { ECMD_ARS_MOVE_CRV,   "Move Curve",    "movement",  1, ars_delta_param, 1, 70, NULL },
+    { ECMD_ARS_MOVE_COL,   "Move Column",   "movement",  1, ars_delta_param, 1, 80, NULL },
+    { ECMD_ARS_SCALE_CRV,  "Scale Curve",   "topology",  1, ars_scale_param, 1, 90, NULL },
+    { ECMD_ARS_SCALE_COL,  "Scale Column",  "topology",  1, ars_scale_param, 1, 100, NULL },
+    { ECMD_ARS_INSERT_CRV, "Insert Curve",  "topology",  0, NULL,            0, 110, NULL },
+    { ECMD_ARS_DEL_CRV,    "Delete Curve",  "topology",  0, NULL,            0, 120, NULL },
+    { ECMD_ARS_DEL_COL,    "Delete Column", "topology",  0, NULL,            0, 130, NULL },
+    { ECMD_ARS_DUP_CRV,    "Dup Curve",     "topology",  0, NULL,            0, 140, NULL },
+    { ECMD_ARS_DUP_COL,    "Dup Column",    "topology",  0, NULL,            0, 150, NULL }
+};
+
+static const struct rt_edit_prim_desc ars_prim_desc = {
+    "ars", "ARS", 15, ars_cmds,
+    0,                    /* nopt         */
+    NULL                  /* opts         */
+};
+
+C_DECL const struct rt_edit_prim_desc *
+rt_edit_ars_edit_desc(void)
+{
+    return &ars_prim_desc;
+}
+
+C_DECL void
 rt_edit_ars_labels(
 	int *UNUSED(num_lines),
 	point_t *UNUSED(lines),
@@ -241,7 +286,7 @@ rt_edit_ars_labels(
     }
 }
 
-const char *
+C_DECL const char *
 rt_edit_ars_keypoint(
 	point_t *pt,
 	const char *UNUSED(keystr),
@@ -279,13 +324,13 @@ rt_edit_ars_keypoint(
     return strp;
 }
 
-struct rt_edit_menu_item *
+C_DECL struct rt_edit_menu_item *
 rt_edit_ars_menu_item(const struct bn_tol *UNUSED(tol))
 {
     return ars_menu;
 }
 
-int
+C_DECL int
 rt_edit_ars_menu_str(struct bu_vls *mstr, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     if (!mstr || !ip)
@@ -1027,7 +1072,7 @@ ecmd_ars_move_pt(struct rt_edit *s)
     VMOVE(&ars->curves[a->es_ars_crv][a->es_ars_col*3], new_pt);
 }
 
-int
+C_DECL int
 rt_edit_ars_edit(struct rt_edit *s)
 {
     bu_clbk_t f = NULL;
@@ -1114,7 +1159,7 @@ rt_edit_ars_edit(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_ars_edit_xy(
 	struct rt_edit *s,
 	const vect_t mousevec

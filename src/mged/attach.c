@@ -36,11 +36,6 @@
 
 #include "bnetwork.h"
 
-/* Make sure this comes after bio.h (for Windows) */
-#ifdef HAVE_GL_GL_H
-#  include <GL/gl.h>
-#endif
-
 #include "vmath.h"
 #include "bu/env.h"
 #include "bu/ptbl.h"
@@ -123,8 +118,10 @@ mged_dm_init(
 
 #ifdef HAVE_TK
     if (dm_graphical(DMP) && !BU_STR_EQUAL(dm_get_dm_name(DMP), "swrast")) {
-	Tk_DeleteGenericHandler(doEvent, (ClientData)s);
+	if (s->tk_generic_handler_active)
+	    Tk_DeleteGenericHandler(doEvent, (ClientData)s);
 	Tk_CreateGenericHandler(doEvent, (ClientData)s);
+	s->tk_generic_handler_active = 1;
     }
 #endif
     (void)dm_configure_win(DMP, 0);
@@ -412,6 +409,7 @@ gui_setup(struct mged_state *s, const char *dstr)
 
     /* create the event handler */
     Tk_CreateGenericHandler(handler, (ClientData)s);
+    s->tk_generic_handler_active = 1;
 
     Tcl_Eval(s->interp, "wm withdraw .");
     Tcl_Eval(s->interp, "tk appname mged");
@@ -641,17 +639,6 @@ f_dm(ClientData clientData, Tcl_Interp *interpreter, int argc, const char *argv[
 	return TCL_OK;
     }
 
-    if (BU_STR_EQUAL(argv[1], "type")) {
-	if (argc != 2) {
-	    bu_vls_printf(&vls, "help dm");
-	    Tcl_Eval(interpreter, bu_vls_addr(&vls));
-	    bu_vls_free(&vls);
-	    return TCL_ERROR;
-	}
-	Tcl_AppendResult(interpreter, dm_get_type(DMP), (char *)NULL);
-	return TCL_OK;
-    }
-
     if (!cmd_hook) {
 	const char *dm_name = dm_get_dm_name(DMP);
 	if (dm_name) {
@@ -740,7 +727,7 @@ dm_var_init(struct mged_state *s, struct mged_dm *target_dm)
     }
     mapped = 1;
     s->mged_curr_dm->dm_netfd = -1;
-    owner = 1;
+    mged_dm_owner = 1;
     am_mode = AMM_IDLE;
     adc_auto = 1;
     grid_auto_size = 1;

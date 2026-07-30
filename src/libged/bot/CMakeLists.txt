@@ -1,11 +1,7 @@
 find_package_eigen(REQUIRED)
 brlcad_find_package(manifold REQUIRED)
 
-set(BOT_LIBS libged libbg libbu manifold::manifold)
-
-brlcad_find_package(Geogram REQUIRED SYSPATTERN geogram)
-set(BOT_LOCAL_INCLUDE_DIRS ${BOT_LOCAL_INCLUDE_DIRS} ${Geogram_INCLUDE_DIR})
-set(BOT_LIBS ${BOT_LIBS} ${Geogram_LIBRARY})
+set(BOT_LIBS libged libbg libbu manifold::manifold ${WINSOCK_LIB})
 
 
 if(BRLCAD_ENABLE_OPENVDB)
@@ -42,6 +38,8 @@ set(
   decimate.cpp
   exterior.cpp
   extrude.cpp
+  info.cpp
+  pick.cpp
   remesh.cpp
   repair.cpp
   smooth.cpp
@@ -87,7 +85,6 @@ ged_plugin_library(ged-bot
 
 cmakefiles(
   CMakeLists.txt
-  ${BOT_SRCS}
   bot_flood_exterior.cpp
   bot_openvdb.cpp
   bot_openvdb.h

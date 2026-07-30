@@ -82,7 +82,7 @@ struct rt_bspline_edit {
     int knot_idx;   /* index within the selected direction's vector */
 };
 
-void *
+C_DECL void *
 rt_edit_bspline_prim_edit_create(struct rt_edit *s)
 {
     struct rt_bspline_edit *e;
@@ -104,7 +104,7 @@ rt_edit_bspline_prim_edit_create(struct rt_edit *s)
     return (void *)e;
 }
 
-void
+C_DECL void
 rt_edit_bspline_prim_edit_destroy(struct rt_bspline_edit *e)
 {
     if (!e)
@@ -112,7 +112,7 @@ rt_edit_bspline_prim_edit_destroy(struct rt_bspline_edit *e)
     BU_PUT(e, struct rt_bspline_edit);
 }
 
-void
+C_DECL void
 rt_edit_bspline_set_edit_mode(struct rt_edit *s, int mode)
 {
     /* In vanilla MGED, entering vertex-pick mode called chg_state() to
@@ -189,10 +189,45 @@ struct rt_edit_menu_item spline_menu[] = {
     { "", NULL, 0 }
 };
 
-struct rt_edit_menu_item *
+C_DECL struct rt_edit_menu_item *
 rt_edit_bspline_menu_item(const struct bn_tol *UNUSED(tol))
 {
     return spline_menu;
+}
+
+static const struct rt_edit_param_desc bspline_idx_param[] = {
+    { "index", "Index", RT_EDIT_PARAM_INTEGER, 0,
+      0.0, RT_EDIT_PARAM_NO_LIMIT, "count", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc bspline_point_param[] = {
+    { "point", "Point", RT_EDIT_PARAM_POINT, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "length", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc bspline_knot_param[] = {
+    { "knot", "Knot", RT_EDIT_PARAM_SCALAR, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "none", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_cmd_desc bspline_cmds[] = {
+    { ECMD_SPLINE_VPICK,      "Pick Vertex",      "selection", 1, bspline_idx_param,   1, 10, NULL },
+    { ECMD_BSPLINE_PICK_CP,   "Pick CP by Index", "selection", 1, bspline_idx_param,   1, 20, NULL },
+    { ECMD_VTRANS,            "Move Vertex",      "movement",  1, bspline_point_param, 1, 30, NULL },
+    { ECMD_BSPLINE_PICK_KNOT, "Pick Knot",        "selection", 1, bspline_idx_param,   1, 40, NULL },
+    { ECMD_BSPLINE_SET_KNOT,  "Set Knot Value",   "topology",  1, bspline_knot_param,  1, 50, NULL }
+};
+
+static const struct rt_edit_prim_desc bspline_prim_desc = {
+    "bspline", "B-Spline", 5, bspline_cmds,
+    0,                    /* nopt         */
+    NULL                  /* opts         */
+};
+
+C_DECL const struct rt_edit_prim_desc *
+rt_edit_bspline_edit_desc(void)
+{
+    return &bspline_prim_desc;
 }
 
 
@@ -329,7 +364,7 @@ sedit_vpick(struct rt_edit *s)
 	(*f)(0, NULL, d, &vs_flag);
 }
 
-void
+C_DECL void
 rt_edit_bspline_labels(
   	int *UNUSED(num_lines),
 	point_t *UNUSED(lines),
@@ -380,7 +415,7 @@ rt_edit_bspline_labels(
     pl[npl].str[0] = '\0';	/* Mark ending */
 }
 
-const char *
+C_DECL const char *
 rt_edit_bspline_keypoint(
 	point_t *pt,
 	const char *UNUSED(keystr),
@@ -605,7 +640,7 @@ ecmd_vtrans(struct rt_edit *s)
 }
 
 
-int
+C_DECL int
 rt_edit_bspline_edit(struct rt_edit *s)
 {
     switch (s->edit_flag) {
@@ -640,7 +675,7 @@ rt_edit_bspline_edit(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_bspline_edit_xy(
 	struct rt_edit *s,
 	const vect_t mousevec

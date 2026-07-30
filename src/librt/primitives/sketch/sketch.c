@@ -130,7 +130,7 @@ rt_check_curve(const struct rt_curve *crv, const struct rt_sketch_internal *skt,
  * A struct sketch_specific is created, and its address is
  * stored in stp->st_specific for use by sketch_shot().
  */
-int
+C_DECL int
 rt_sketch_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 {
     if (!stp)
@@ -144,7 +144,7 @@ rt_sketch_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 }
 
 
-void
+C_DECL void
 rt_sketch_print(const struct soltab *stp)
 {
     if (stp) RT_CK_SOLTAB(stp);
@@ -159,7 +159,7 @@ rt_sketch_print(const struct soltab *stp)
  * 0 MISS
  * >0 HIT
  */
-int
+C_DECL int
 rt_sketch_shot(struct soltab *stp, struct xray *rp, struct application *ap, struct seg *seghead)
 {
     if (!stp || !rp || !ap || !seghead)
@@ -178,9 +178,25 @@ rt_sketch_shot(struct soltab *stp, struct xray *rp, struct application *ap, stru
 
 
 /**
+ * Vectorized rt_sketch_shot(): a sketch is not solid geometry, so every
+ * ray in the batch misses.
+ */
+C_DECL void
+rt_sketch_vshot(struct soltab **stp, struct xray **UNUSED(rp), struct seg *segp, int n, struct application *ap)
+{
+    int i;
+    if (ap) RT_CK_APPLICATION(ap);
+    for (i = 0; i < n; i++) {
+	if (stp[i] == 0) continue;		/* skip this ray */
+	segp[i].seg_stp = (struct soltab *)0;	/* always MISS */
+    }
+}
+
+
+/**
  * Given ONE ray distance, return the normal and entry/exit point.
  */
-void
+C_DECL void
 rt_sketch_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
 {
     if (!hitp || !rp)
@@ -197,7 +213,7 @@ rt_sketch_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
 /**
  * Return the curvature of the sketch.
  */
-void
+C_DECL void
 rt_sketch_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
 {
     if (!cvp || !hitp)
@@ -219,7 +235,7 @@ rt_sketch_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
  *
  * u = azimuth,  v = elevation
  */
-void
+C_DECL void
 rt_sketch_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct uvcoord *uvp)
 {
     if (ap) RT_CK_APPLICATION(ap);
@@ -230,7 +246,7 @@ rt_sketch_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struc
 }
 
 
-void
+C_DECL void
 rt_sketch_free(struct soltab *stp)
 {
     if (stp) RT_CK_SOLTAB(stp);
@@ -463,7 +479,7 @@ rt_sketch_degree(struct rt_sketch_internal *sk)
 }
 
 
-int
+C_DECL int
 seg_to_vlist(struct bu_list *vlfree, struct bu_list *vhead, const struct bg_tess_tol *ttol, fastf_t *V, fastf_t *u_vec, fastf_t *v_vec, struct rt_sketch_internal *sketch_ip, void *seg)
 {
     int ret=0;
@@ -871,7 +887,7 @@ curve_to_vlist(struct bu_list *vlfree, struct bu_list *vhead, const struct bg_te
 }
 
 
-int
+C_DECL int
 rt_sketch_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_tess_tol *ttol, const struct bn_tol *UNUSED(tol), const struct bview *UNUSED(info))
 {
     struct rt_sketch_internal *sketch_ip;
@@ -1021,7 +1037,7 @@ sketch_centroid_with_precision(point_t *cent,
     return n;
 }
 
-void
+C_DECL void
 rt_sketch_centroid(point_t *cent, const struct rt_db_internal *ip)
 {
     /* With BN_TOL_DIST instead, even relatively simple sketches can
@@ -1088,7 +1104,7 @@ rt_sketch_tess(struct nmgregion **UNUSED(r), struct model *UNUSED(m), struct rt_
  * Import an SKETCH from the database format to the internal format.
  * Apply modeling transformations as well.
  */
-int
+C_DECL int
 rt_sketch_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     struct rt_sketch_internal *sketch_ip;
@@ -1270,7 +1286,7 @@ rt_sketch_import4(struct rt_db_internal *ip, const struct bu_external *ep, const
 /**
  * The name is added by the caller, in the usual place.
  */
-int
+C_DECL int
 rt_sketch_export4(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_sketch_internal *sketch_ip;
@@ -1458,7 +1474,7 @@ rt_sketch_export4(struct bu_external *ep, const struct rt_db_internal *ip, doubl
     return 0;
 }
 
-int
+C_DECL int
 rt_sketch_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !ip || !mat)
@@ -1485,7 +1501,7 @@ rt_sketch_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_in
  * Import an SKETCH from the database format to the internal format.
  * Apply modeling transformations as well.
  */
-int
+C_DECL int
 rt_sketch_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     struct rt_sketch_internal *sketch_ip;
@@ -1667,7 +1683,7 @@ rt_sketch_import5(struct rt_db_internal *ip, const struct bu_external *ep, const
 /**
  * The name is added by the caller, in the usual place.
  */
-int
+C_DECL int
 rt_sketch_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_sketch_internal *sketch_ip;
@@ -1870,7 +1886,7 @@ rt_sketch_export5(struct bu_external *ep, const struct rt_db_internal *ip, doubl
  * line describes type of solid.  Additional lines are indented one
  * tab, and give parameter values.
  */
-int
+C_DECL int
 rt_sketch_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local)
 {
     struct rt_sketch_internal *sketch_ip =
@@ -2116,7 +2132,7 @@ rt_curve_free(struct rt_curve *crv)
  * Free the storage associated with the rt_db_internal version of this
  * solid.
  */
-void
+C_DECL void
 rt_sketch_ifree(struct rt_db_internal *ip)
 {
     struct rt_sketch_internal *sketch_ip;
@@ -2295,7 +2311,7 @@ curve_to_tcl_list(struct bu_vls *vls, struct rt_curve *crv)
 }
 
 
-int rt_sketch_form(struct bu_vls *logstr, const struct rt_functab *ftp)
+C_DECL int rt_sketch_form(struct bu_vls *logstr, const struct rt_functab *ftp)
 {
     BU_CK_VLS(logstr);
     RT_CK_FUNCTAB(ftp);
@@ -2306,7 +2322,7 @@ int rt_sketch_form(struct bu_vls *logstr, const struct rt_functab *ftp)
 }
 
 
-int
+C_DECL int
 rt_sketch_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *attr)
 {
     struct rt_sketch_internal *skt=(struct rt_sketch_internal *)intern->idb_ptr;
@@ -2507,7 +2523,7 @@ get_tcl_curve(struct bu_vls *logstr, struct rt_curve *crv, const char *argv1)
 }
 
 
-int
+C_DECL int
 rt_sketch_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv)
 {
     struct rt_sketch_internal *skt;
@@ -2612,7 +2628,109 @@ rt_sketch_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc,
 }
 
 
-int
+C_DECL int
+rt_sketch_make(const struct rt_functab *ftp, struct rt_db_internal* intern, const char* UNUSED(variant), const point_t origin, double UNUSED(scale))
+{
+    struct rt_sketch_internal *sketch_ip;
+
+    intern->idb_major_type = DB5_MAJORTYPE_BRLCAD;
+    intern->idb_type = ID_SKETCH;
+    BU_ASSERT(&OBJ[intern->idb_type] == ftp);
+    intern->idb_meth = ftp;
+
+    BU_ALLOC(sketch_ip, struct rt_sketch_internal);
+    intern->idb_ptr = (void *)sketch_ip;
+    sketch_ip->magic = RT_SKETCH_INTERNAL_MAGIC;
+
+    VSET(sketch_ip->u_vec, 1.0, 0.0, 0.0);
+    VSET(sketch_ip->v_vec, 0.0, 1.0, 0.0);
+    VSET(sketch_ip->V, origin[X], origin[Y], origin[Z]);
+
+    /* empty sketch */
+    sketch_ip->vert_count = 0;
+    sketch_ip->verts = (point2d_t *)NULL;
+    sketch_ip->curve.count = 0;
+    sketch_ip->curve.reverse = (int *)NULL;
+    sketch_ip->curve.segment = (void **)NULL;
+#if 0
+    /* Historically 'make' had a LIBGED_MAKE_SKETCH env var that produced a
+     * fitted 7-vertex sketch scaled (below). This isn't really in the spirit of
+     * a default 'make', but may be useful for debugging in the future; leaving
+     * here for that reason.
+     */
+    struct carc_seg *csg;
+    struct line_seg *lsg;
+
+    /* this creates a "default" sketch object -- useful for debugging purposes. */
+
+    sketch_ip->vert_count = 7;
+    sketch_ip->verts = (point2d_t *)bu_calloc(sketch_ip->vert_count, sizeof(point2d_t), "sketch_ip->verts");
+    sketch_ip->verts[0][0] = 0.25*scale;
+    sketch_ip->verts[0][1] = 0.0;
+    sketch_ip->verts[1][0] = 0.5*scale;
+    sketch_ip->verts[1][1] = 0.0;
+    sketch_ip->verts[2][0] = 0.5*scale;
+    sketch_ip->verts[2][1] = 0.5*scale;
+    sketch_ip->verts[3][0] = 0.0;
+    sketch_ip->verts[3][1] = 0.5*scale;
+    sketch_ip->verts[4][0] = 0.0;
+    sketch_ip->verts[4][1] = 0.25*scale;
+    sketch_ip->verts[5][0] = 0.25*scale;
+    sketch_ip->verts[5][1] = 0.25*scale;
+    sketch_ip->verts[6][0] = 0.125*scale;
+    sketch_ip->verts[6][1] = 0.125*scale;
+    sketch_ip->curve.count = 6;
+    sketch_ip->curve.reverse = (int *)bu_calloc(sketch_ip->curve.count, sizeof(int), "sketch_ip->curve.reverse");
+    sketch_ip->curve.segment = (void **)bu_calloc(sketch_ip->curve.count, sizeof(void *), "sketch_ip->curve.segment");
+
+    BU_ALLOC(csg, struct carc_seg);
+    sketch_ip->curve.segment[0] = (void *)csg;
+    csg->magic = CURVE_CARC_MAGIC;
+    csg->start = 4;
+    csg->end = 0;
+    csg->radius = 0.25*scale;
+    csg->center_is_left = 1;
+    csg->orientation = 0;
+
+    BU_ALLOC(lsg, struct line_seg);
+    sketch_ip->curve.segment[1] = (void *)lsg;
+    lsg->magic = CURVE_LSEG_MAGIC;
+    lsg->start = 0;
+    lsg->end = 1;
+
+    BU_ALLOC(lsg, struct line_seg);
+    sketch_ip->curve.segment[2] = (void *)lsg;
+    lsg->magic = CURVE_LSEG_MAGIC;
+    lsg->start = 1;
+    lsg->end = 2;
+
+    BU_ALLOC(lsg, struct line_seg);
+    sketch_ip->curve.segment[3] = (void *)lsg;
+    lsg->magic = CURVE_LSEG_MAGIC;
+    lsg->start = 2;
+    lsg->end = 3;
+
+    BU_ALLOC(lsg, struct line_seg);
+    sketch_ip->curve.segment[4] = (void *)lsg;
+    lsg->magic = CURVE_LSEG_MAGIC;
+    lsg->start = 3;
+    lsg->end = 4;
+
+    BU_ALLOC(csg, struct carc_seg);
+    sketch_ip->curve.segment[5] = (void *)csg;
+    csg->magic = CURVE_CARC_MAGIC;
+    csg->start = 6;
+    csg->end = 5;
+    csg->radius = -1.0;
+    csg->center_is_left = 1;
+    csg->orientation = 0;
+#endif
+
+    return BRLCAD_OK;
+}
+
+
+C_DECL int
 rt_sketch_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
 {
     if (ip) RT_CK_DB_INTERNAL(ip);
@@ -2734,7 +2852,7 @@ rt_curve_order_segments(struct rt_curve *crv)
     }
 }
 
-const char *
+C_DECL const char *
 rt_sketch_keypoint(point_t *pt, const char *keystr, const mat_t mat, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     if (!pt || !ip)

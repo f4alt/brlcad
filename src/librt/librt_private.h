@@ -147,6 +147,8 @@ struct rt_i_internal {
     /* rt_submodel parameters */
     char *              rti_treetop;            /**< @brief  bu_strduped, for rt_submodel rti's only */
     size_t              rti_uses;               /**< @brief  for rt_submodel */
+    struct resource *   rti_submodel_resources[MAX_PSW]; /**< @brief private per-cpu resources for rt_submodel */
+    size_t              rti_submodel_resource_refs;       /**< @brief number of rt_submodel users sharing the resource cache */
 
     /* Dynamic geometry */
     int                 rti_add_to_new_solids_list;
@@ -254,7 +256,6 @@ struct dbi_update_nref_clbk {
     void *u_data;
 };
 
-extern int db_read(const struct db_i *dbip, void *addr, size_t count, b_off_t offset);
 
 /* db5_io.c */
 #define DB_SIZE_OBJ 0x1
@@ -430,6 +431,21 @@ RT_EXPORT extern void _res_pieces_clean(struct resource *resp,
  */
 RT_EXPORT extern void _res_pieces_init(struct resource *resp,
 					 struct rt_i *rtip);
+
+
+/**
+ * Generic flat-array ft_vshot() built on a scalar ft_shot().
+ *
+ * For each ray, calls shotfn() into a temporary seg list and writes the
+ * OUTER SPAN (nearest in, farthest out) into segp[i], matching the
+ * single-seg vshot convention.  Provides a correct (parity) vshot for
+ * primitives whose intersection core is not (yet) vectorized; a
+ * primitive's rt_X_vshot() can be a one-line call to this with rt_X_shot.
+ */
+RT_EXPORT extern void rt_vshot_via_shot(
+    int (*shotfn)(struct soltab *, struct xray *, struct application *, struct seg *),
+    struct soltab **stp, struct xray **rp, struct seg *segp, int n,
+    struct application *ap);
 
 
 __END_DECLS

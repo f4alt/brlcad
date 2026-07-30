@@ -43,13 +43,6 @@
 #include "./ext.h"
 
 
-extern int rpt_overlap;
-
-/* from opt.c */
-extern double units;
-extern int default_units;
-extern int model_units;
-
 static size_t hit_count=0;
 static fastf_t cell_area=0.0;
 
@@ -70,7 +63,7 @@ struct bu_structparse view_parse[] = {
 };
 
 
-const char title[] = "RT Area";
+EXTERNCPP const char title[] = "RT Area";
 
 struct point_list {
     struct point_list * next;
@@ -1065,7 +1058,7 @@ view_end(struct application *ap)
 		}
 	    }
 	    bu_free(cell, "view_end area free");
-	    cell = (void *)NULL;
+	    cell = NULL;
 	}
     }
 
@@ -1182,7 +1175,7 @@ void view_setup(struct rt_i *UNUSED(rtip)) {}
 void view_cleanup(struct rt_i *UNUSED(rtip)) {}
 
 
-void
+C_DECL void
 application_init (void) {
     option("", "-u units", "Set the display units (default=mm)", 0);
     option("", "-U #", "Set use_air boolean to # (default=1)", 0);

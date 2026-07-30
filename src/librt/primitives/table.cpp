@@ -50,7 +50,7 @@ extern "C" {
     extern void rt_##name##_norm(struct hit *hitp, struct soltab *stp, struct xray *rp); \
     extern void rt_##name##_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct uvcoord *uvp); \
     extern void rt_##name##_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp); \
-    extern int rt_##name##_class(const struct soltab *, const vect_t *, const vect_t *, const struct bn_tol *); \
+    extern int rt_##name##_class(const struct soltab *, const vect_t, const vect_t, const struct bn_tol *); \
     extern void rt_##name##_free(struct soltab *stp); \
     extern int rt_##name##_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_tess_tol *ttol, const struct bn_tol *tol, const struct bview *info); \
     extern int rt_##name##_adaptive_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bn_tol *tol, const struct bview *v, fastf_t s_size); \
@@ -66,7 +66,7 @@ extern "C" {
     extern int rt_##name##_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *attr); \
     extern int rt_##name##_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv); \
     extern int rt_##name##_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local); \
-    extern void rt_##name##_make(const struct rt_functab *ftp, struct rt_db_internal *intern); \
+    extern int rt_##name##_make(const struct rt_functab *ftp, struct rt_db_internal *intern, const char *variant, const point_t origin, double scale); \
     extern int rt_##name##_xform(struct rt_db_internal *op, const mat_t mat, struct rt_db_internal *ip, int release, struct db_i *dbip); \
     extern int rt_##name##_params(struct pc_pc_set *ps, const struct rt_db_internal *ip); \
     extern int rt_##name##_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct bn_tol *tol); \
@@ -130,6 +130,7 @@ RT_DECLARE_INTERFACE(brep);
 RT_DECLARE_INTERFACE(joint);
 RT_DECLARE_INTERFACE(script);
 
+extern "C" {
 
 /* generics for object manipulation, in generic.c */
 extern int rt_generic_get(struct bu_vls *, const struct rt_db_internal *, const char *);
@@ -141,12 +142,10 @@ extern int rt_generic_scene_obj(struct bv_scene_obj *s, struct directory *dp, st
 
 /* from primitives/crofton.cpp - Cauchy-Crofton SA/volume functab callbacks
  * (internal to librt; not exported via the public header)              */
-extern "C" {
 extern void rt_crofton_surf_area(fastf_t *area, const struct rt_db_internal *ip);
 extern void rt_crofton_volume(fastf_t *vol, const struct rt_db_internal *ip);
 extern void rt_crofton_surf_area_implicit(fastf_t *area, const struct rt_db_internal *ip);
 extern void rt_crofton_volume_implicit(fastf_t *vol, const struct rt_db_internal *ip);
-}
 
 /* from primitives/poly/poly.c - analytic polysolid measure functions */
 extern void rt_pg_volume(fastf_t *volume, const struct rt_db_internal *ip);
@@ -157,7 +156,7 @@ extern int rt_binunif_import5(struct rt_db_internal * ip, const struct bu_extern
 extern int rt_binunif_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip);
 extern void rt_binunif_ifree(struct rt_db_internal *ip);
 extern int rt_binunif_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local);
-extern void rt_binunif_make(const struct rt_functab *ftp, struct rt_db_internal *intern);
+extern int rt_binunif_make(const struct rt_functab *ftp, struct rt_db_internal *intern, const char *variant, const point_t origin, double scale);
 extern int rt_binunif_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *attr);
 extern int rt_binunif_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv);
 
@@ -167,7 +166,7 @@ extern int rt_comb_import5(struct rt_db_internal *ip, const struct bu_external *
 extern int rt_comb_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *item);
 extern int rt_comb_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv);
 extern int rt_comb_form(struct bu_vls *logstr, const struct rt_functab *ftp);
-extern void rt_comb_make(const struct rt_functab *ftp, struct rt_db_internal *intern);
+extern int rt_comb_make(const struct rt_functab *ftp, struct rt_db_internal *intern, const char *variant, const point_t origin, double scale);
 extern void rt_comb_ifree(struct rt_db_internal *ip);
 extern int rt_comb_mat(struct rt_db_internal *op, const mat_t mat, const struct rt_db_internal *ip);
 extern int rt_comb_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, const struct bg_tess_tol *ttol, const struct bn_tol *tol);
@@ -177,13 +176,26 @@ extern void rt_comb_volume(fastf_t *vol, const struct rt_db_internal *ip);
 extern int rt_annot_form(struct bu_vls *logstr, const struct rt_functab *ftp);
 extern int rt_bot_form(struct bu_vls *logstr, const struct rt_functab *ftp);
 extern int rt_cline_form(struct bu_vls *logstr, const struct rt_functab *ftp);
+extern int rt_datum_form(struct bu_vls *logstr, const struct rt_functab *ftp);
 extern int rt_ebm_form(struct bu_vls *logstr, const struct rt_functab *ftp);
 extern int rt_extrude_form(struct bu_vls *logstr, const struct rt_functab *ftp);
 extern int rt_metaball_form(struct bu_vls *logstr, const struct rt_functab *ftp);
+extern int rt_pnts_form(struct bu_vls *logstr, const struct rt_functab *ftp);
 extern int rt_script_form(struct bu_vls *logstr, const struct rt_functab *ftp);
 extern int rt_sketch_form(struct bu_vls *logstr, const struct rt_functab *ftp);
 
+} // extern "C"
 
+
+extern int rt_rpc_functab_validate(struct bu_vls *error_msg, const struct rt_db_internal *ip, const struct bn_tol *tol);
+extern int rt_ell_functab_validate(struct bu_vls *error_msg, const struct rt_db_internal *ip, const struct bn_tol *tol);
+extern int rt_tgc_functab_validate(struct bu_vls *error_msg, const struct rt_db_internal *ip, const struct bn_tol *tol);
+extern int rt_eto_functab_validate(struct bu_vls *error_msg, const struct rt_db_internal *ip, const struct bn_tol *tol);
+extern int rt_bot_functab_validate(struct bu_vls *error_msg, const struct rt_db_internal *ip, const struct bn_tol *tol);
+extern int rt_ehy_functab_validate(struct bu_vls *error_msg, const struct rt_db_internal *ip, const struct bn_tol *tol);
+extern int rt_epa_functab_validate(struct bu_vls *error_msg, const struct rt_db_internal *ip, const struct bn_tol *tol);
+extern int rt_rhc_functab_validate(struct bu_vls *error_msg, const struct rt_db_internal *ip, const struct bn_tol *tol);
+extern int rt_arb_functab_validate(struct bu_vls *error_msg, const struct rt_db_internal *ip, const struct bn_tol *tol);
 const struct rt_functab OBJ[] = {
     {
 	/* 0: unused, for sanity checking. */
@@ -233,7 +245,8 @@ const struct rt_functab OBJ[] = {
 	NULL,
 	NULL,
 	NULL,
-	NULL
+	NULL,
+	NULL /* validate */
     },
 
     {
@@ -269,7 +282,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_generic_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_generic_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_generic_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_tor_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_tor_params),
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_tor_bbox),
 	RTFUNCTAB_FUNC_VOLUME_CAST(rt_tor_volume),
@@ -284,7 +297,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_tor_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_tor_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_tor_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -320,7 +334,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_generic_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_generic_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_generic_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_tgc_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_tgc_params),
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_tgc_bbox),
 	RTFUNCTAB_FUNC_VOLUME_CAST(rt_tgc_volume),
@@ -335,7 +349,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_tgc_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_tgc_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_tgc_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	RTFUNCTAB_FUNC_VALIDATE_CAST(rt_tgc_functab_validate) /* validate */
     },
 
     {
@@ -371,7 +386,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_generic_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_generic_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_generic_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_ell_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_ell_params),
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_ell_bbox),
 	RTFUNCTAB_FUNC_VOLUME_CAST(rt_ell_volume),
@@ -386,7 +401,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_ell_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_ell_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_ell_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	RTFUNCTAB_FUNC_VALIDATE_CAST(rt_ell_functab_validate) /* validate */
     },
 
     {
@@ -422,7 +438,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_generic_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_generic_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_generic_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_arb_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_arb_params),
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_arb_bbox),
 	RTFUNCTAB_FUNC_VOLUME_CAST(rt_arb_volume),
@@ -437,7 +453,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_arb_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_arb_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_arb_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	RTFUNCTAB_FUNC_VALIDATE_CAST(rt_arb_functab_validate) /* validate */
     },
 
     {
@@ -456,7 +473,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_bot_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_ars_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_bot_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_ars_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_ars_brep),
@@ -473,7 +490,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_ars_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_ars_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_generic_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_ars_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_ars_params),
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_ars_bbox),
 	RTFUNCTAB_FUNC_VOLUME_CAST(rt_crofton_volume_implicit),
@@ -488,7 +505,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_ars_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -524,7 +542,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_generic_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_generic_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_generic_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_hlf_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_hlf_params),
 	NULL, /* bbox */
 	NULL, /* volume */
@@ -539,7 +557,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_hlf_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_hlf_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_hlf_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -590,7 +609,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_tgc_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_tgc_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_tgc_perturb), /* perturb - REC shares rt_tgc_internal */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -609,7 +629,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_pg_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_pg_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_pg_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_pg_tess),
 	NULL, /* tnurb */
 	NULL, /* brep */
@@ -641,7 +661,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_pg_keypoint), /* keypoint */
 	NULL, /* mat */
 	NULL, /* perturb */
-	NULL  /* scene_obj */
+	NULL  /* scene_obj */,
+	NULL /* validate */
     },
 
     {
@@ -660,7 +681,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_nurb_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_nurb_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_nurb_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_nurb_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_nurb_brep),
@@ -692,7 +713,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_nurb_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -743,7 +765,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_ell_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_ell_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_ell_perturb), /* perturb - SPH shares rt_ell_internal */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -762,7 +785,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_nmg_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_nmg_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_nmg_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_nmg_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_nmg_brep),
@@ -794,7 +817,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_nmg_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -813,7 +837,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_ebm_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_ebm_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_ebm_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_ebm_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_ebm_brep),
@@ -845,7 +869,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_ebm_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_ebm_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -864,7 +889,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_vol_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_vol_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_vol_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_vol_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_vol_brep),
@@ -896,7 +921,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_vol_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_vol_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -915,7 +941,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_arbn_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_arbn_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_arbn_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_arbn_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_arbn_brep),
@@ -947,7 +973,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_arbn_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_arbn_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_arbn_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -966,7 +993,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_pipe_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_pipe_plot),
 	RTFUNCTAB_FUNC_ADAPTIVE_PLOT_CAST(rt_pipe_adaptive_plot),
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_pipe_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_pipe_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_pipe_brep),
@@ -998,7 +1025,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_pipe_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -1017,7 +1045,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_part_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_part_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_part_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_part_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_part_brep),
@@ -1034,7 +1062,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_generic_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_generic_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_generic_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_part_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_part_params),
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_part_bbox),
 	RTFUNCTAB_FUNC_VOLUME_CAST(rt_part_volume),
@@ -1049,7 +1077,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_part_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_part_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_part_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -1068,7 +1097,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_rpc_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_rpc_plot),
 	RTFUNCTAB_FUNC_ADAPTIVE_PLOT_CAST(rt_rpc_adaptive_plot),
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_rpc_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_rpc_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_rpc_brep),
@@ -1100,7 +1129,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_rpc_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_rpc_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_rpc_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	RTFUNCTAB_FUNC_VALIDATE_CAST(rt_rpc_functab_validate) /* validate */
     },
 
     {
@@ -1119,7 +1149,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_rhc_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_rhc_plot),
 	RTFUNCTAB_FUNC_ADAPTIVE_PLOT_CAST(rt_rhc_adaptive_plot),
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_rhc_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_rhc_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_rhc_brep),
@@ -1151,7 +1181,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_rhc_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_rhc_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_rhc_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	RTFUNCTAB_FUNC_VALIDATE_CAST(rt_rhc_functab_validate) /* validate */
     },
 
     {
@@ -1170,7 +1201,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_epa_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_epa_plot),
 	RTFUNCTAB_FUNC_ADAPTIVE_PLOT_CAST(rt_epa_adaptive_plot),
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_epa_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_epa_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_epa_brep),
@@ -1202,7 +1233,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_epa_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_epa_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_epa_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	RTFUNCTAB_FUNC_VALIDATE_CAST(rt_epa_functab_validate) /* validate */
     },
 
     {
@@ -1221,7 +1253,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_ehy_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_ehy_plot),
 	RTFUNCTAB_FUNC_ADAPTIVE_PLOT_CAST(rt_ehy_adaptive_plot),
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_ehy_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_ehy_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_ehy_brep),
@@ -1253,7 +1285,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_ehy_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_ehy_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_ehy_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	RTFUNCTAB_FUNC_VALIDATE_CAST(rt_ehy_functab_validate) /* validate */
     },
 
     {
@@ -1272,7 +1305,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_eto_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_eto_plot),
 	RTFUNCTAB_FUNC_ADAPTIVE_PLOT_CAST(rt_eto_adaptive_plot),
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_eto_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_eto_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_eto_brep),
@@ -1304,7 +1337,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_eto_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_eto_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_eto_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	RTFUNCTAB_FUNC_VALIDATE_CAST(rt_eto_functab_validate) /* validate */
     },
 
     {
@@ -1323,7 +1357,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_grp_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_grp_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_grp_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_grp_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_grp_brep),
@@ -1340,7 +1374,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_generic_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_generic_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_generic_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_grp_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_grp_params),
 	NULL, /* bbox */
 	NULL, /* volume */
@@ -1355,7 +1389,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_grp_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_grp_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -1374,7 +1409,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_joint_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_joint_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_joint_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_joint_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_joint_brep),
@@ -1406,7 +1441,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_joint_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_joint_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -1425,7 +1461,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_hf_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_hf_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_hf_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_hf_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_hf_brep),
@@ -1457,7 +1493,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_hf_keypoint), /* keypoint */
 	NULL, /* mat */
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -1476,7 +1513,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_dsp_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_dsp_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_dsp_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_dsp_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_dsp_brep),
@@ -1496,8 +1533,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_MAKE_CAST(rt_dsp_make),
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_dsp_params),
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_dsp_bbox),
-	RTFUNCTAB_FUNC_VOLUME_CAST(rt_crofton_volume),
-	RTFUNCTAB_FUNC_SURF_AREA_CAST(rt_crofton_surf_area),
+	RTFUNCTAB_FUNC_VOLUME_CAST(rt_dsp_volume),
+	RTFUNCTAB_FUNC_SURF_AREA_CAST(rt_dsp_surf_area),
 	NULL, /* centroid */
 	NULL, /* oriented_bbox */
 	NULL, /* find_selections */
@@ -1508,7 +1545,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_dsp_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_dsp_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -1527,7 +1565,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_sketch_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_sketch_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_sketch_vshot),
 	NULL, /* tess */
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_sketch_brep),
@@ -1544,7 +1582,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_sketch_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_sketch_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_sketch_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_sketch_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_sketch_params),
 	NULL, /* bbox */
 	NULL, /* volume */
@@ -1559,7 +1597,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_sketch_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_sketch_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -1578,7 +1617,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_extrude_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_extrude_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_extrude_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_extrude_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_extrude_brep),
@@ -1610,7 +1649,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_extrude_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_extrude_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -1629,7 +1669,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_submodel_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_submodel_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_submodel_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_submodel_tess),
 	NULL, /* tnurb */
 	NULL, /* brep */
@@ -1661,7 +1701,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_submodel_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -1680,7 +1721,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_cline_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_cline_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_cline_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_cline_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_cline_brep),
@@ -1697,7 +1738,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_cline_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_cline_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_cline_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_cline_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_cline_params),
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_cline_bbox),
 	NULL, /* volume */
@@ -1712,7 +1753,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_cline_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_cline_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -1731,7 +1773,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_bot_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_bot_plot),
 	RTFUNCTAB_FUNC_ADAPTIVE_PLOT_CAST(rt_bot_adaptive_plot),
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_bot_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_bot_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_bot_brep),
@@ -1748,7 +1790,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_bot_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_bot_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_bot_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_bot_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_bot_params),
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_bot_bbox),
 	RTFUNCTAB_FUNC_VOLUME_CAST(rt_bot_volume),
@@ -1763,7 +1805,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_bot_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_bot_mat),
 	NULL, /* perturb */
-	NULL   /* scene_obj */
+	NULL   /* scene_obj */,
+	RTFUNCTAB_FUNC_VALIDATE_CAST(rt_bot_functab_validate) /* validate */
     },
 
     {
@@ -1814,7 +1857,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_comb_mat),
 	NULL, /* perturb */
-	NULL   /* scene_obj */
+	NULL   /* scene_obj */,
+	NULL /* validate */
     },
 
     {
@@ -1867,7 +1911,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	NULL, /* mat */
 	NULL, /* perturb */
-	NULL  /* scene_obj */
+	NULL  /* scene_obj */,
+	NULL /* validate */
     },
 
     {
@@ -1918,7 +1963,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	NULL, /* mat */
 	NULL, /* perturb */
-	NULL  /* scene_obj */
+	NULL  /* scene_obj */,
+	NULL /* validate */
     },
 
     {
@@ -1971,7 +2017,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	NULL, /* mat */
 	NULL, /* perturb */
-	NULL  /* scene_obj */
+	NULL  /* scene_obj */,
+	NULL /* validate */
     },
 
     {
@@ -1990,7 +2037,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_superell_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_superell_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_superell_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_superell_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_superell_brep),
@@ -2007,7 +2054,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_generic_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_generic_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_generic_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_superell_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_superell_params),
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_superell_bbox),
 	RTFUNCTAB_FUNC_VOLUME_CAST(rt_superell_volume),
@@ -2022,7 +2069,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_superell_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_superell_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_superell_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -2041,7 +2089,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_metaball_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_metaball_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_metaball_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_metaball_tess),
 	NULL, /* tnurb */
 	NULL, /* brep */
@@ -2073,7 +2121,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_metaball_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -2092,7 +2141,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_brep_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_brep_plot),
 	RTFUNCTAB_FUNC_ADAPTIVE_PLOT_CAST(rt_brep_adaptive_plot),
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_brep_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_brep_tess),
 	NULL, /* tnurb */
 	NULL, /* brep */
@@ -2124,7 +2173,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_brep_mat),
 	NULL, /* perturb */
-	NULL   /* scene_obj */
+	NULL   /* scene_obj */,
+	NULL /* validate */
     },
 
     {
@@ -2143,7 +2193,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_hyp_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_hyp_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_hyp_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_hyp_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_hyp_brep),
@@ -2160,7 +2210,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_GET_CAST(rt_generic_get),
 	RTFUNCTAB_FUNC_ADJUST_CAST(rt_generic_adjust),
 	RTFUNCTAB_FUNC_FORM_CAST(rt_generic_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_hyp_make), /* make */
 	RTFUNCTAB_FUNC_PARAMS_CAST(rt_hyp_params),
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_hyp_bbox),
 	RTFUNCTAB_FUNC_VOLUME_CAST(rt_hyp_volume),
@@ -2175,7 +2225,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_hyp_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_hyp_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_hyp_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -2226,7 +2277,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	NULL, /* mat */
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -2245,7 +2297,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_revolve_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_revolve_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_revolve_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_revolve_tess),
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_revolve_brep),
@@ -2277,7 +2329,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_revolve_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_revolve_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -2285,18 +2338,18 @@ const struct rt_functab OBJ[] = {
 	RT_FUNCTAB_MAGIC, "ID_PNTS", "pnts",
 	0,
 	RTFUNCTAB_FUNC_PREP_CAST(rt_pnts_prep),
-	NULL, /* shot */
+	RTFUNCTAB_FUNC_SHOT_CAST(rt_pnts_shot),
 	RTFUNCTAB_FUNC_PRINT_CAST(rt_pnts_print),
-	NULL, /* norm */
+	RTFUNCTAB_FUNC_NORM_CAST(rt_pnts_norm),
 	NULL, /* piece_shot */
 	NULL, /* piece_hitsegs */
-	NULL, /* uv */
+	RTFUNCTAB_FUNC_UV_CAST(rt_pnts_uv),
 	NULL, /* curve */
 	NULL, /* class */
-	NULL, /* free */
+	RTFUNCTAB_FUNC_FREE_CAST(rt_pnts_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_pnts_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_pnts_vshot),
 	NULL, /* tess */
 	NULL, /* tnurb */
 	RTFUNCTAB_FUNC_BREP_CAST(rt_pnts_brep),
@@ -2310,10 +2363,10 @@ const struct rt_functab OBJ[] = {
 	NULL, /* parse */
 	sizeof(struct rt_pnts_internal),
 	RT_PNTS_INTERNAL_MAGIC,
-	NULL, /* get */
-	NULL, /* adjust */
-	NULL, /* form */
-	NULL, /* make */
+	RTFUNCTAB_FUNC_GET_CAST(rt_pnts_get),
+	RTFUNCTAB_FUNC_ADJUST_CAST(rt_pnts_adjust),
+	RTFUNCTAB_FUNC_FORM_CAST(rt_pnts_form),
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_pnts_make), /* make */
 	NULL, /* params */
 	RTFUNCTAB_FUNC_BBOX_CAST(rt_pnts_bbox),
 	NULL, /* volume */
@@ -2328,7 +2381,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_pnts_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -2347,7 +2401,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_annot_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_annot_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_annot_vshot),
 	NULL, /* tess */
 	NULL, /* tnurb */
 	NULL, /* brep */
@@ -2379,7 +2433,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_annot_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_annot_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
     {
@@ -2430,7 +2485,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_hrt_mat),
 	RTFUNCTAB_FUNC_PERTURB_CAST(rt_hrt_perturb), /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
 
@@ -2450,7 +2506,7 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_FREE_CAST(rt_datum_free),
 	RTFUNCTAB_FUNC_PLOT_CAST(rt_datum_plot),
 	NULL, /* adaptive_plot */
-	NULL, /* vshot */
+	RTFUNCTAB_FUNC_VSHOT_CAST(rt_datum_vshot),
 	RTFUNCTAB_FUNC_TESS_CAST(rt_datum_tess),
 	NULL, /* tnurb */
 	NULL, /* brep */
@@ -2464,10 +2520,10 @@ const struct rt_functab OBJ[] = {
 	NULL, /* parse */
 	sizeof(struct rt_datum_internal),
 	RT_DATUM_INTERNAL_MAGIC,
-	RTFUNCTAB_FUNC_GET_CAST(rt_generic_get),
-	RTFUNCTAB_FUNC_ADJUST_CAST(rt_generic_adjust),
-	RTFUNCTAB_FUNC_FORM_CAST(rt_generic_form),
-	NULL, /* make */
+	RTFUNCTAB_FUNC_GET_CAST(rt_datum_get),
+	RTFUNCTAB_FUNC_ADJUST_CAST(rt_datum_adjust),
+	RTFUNCTAB_FUNC_FORM_CAST(rt_datum_form),
+	RTFUNCTAB_FUNC_MAKE_CAST(rt_datum_make), /* make */
 	NULL, /* params */
 	NULL, /* bbox */
 	NULL, /* volume */
@@ -2482,7 +2538,8 @@ const struct rt_functab OBJ[] = {
 	RTFUNCTAB_FUNC_KEYPOINT_CAST(rt_datum_keypoint), /* keypoint */
 	RTFUNCTAB_FUNC_MAT_CAST(rt_datum_mat),
 	NULL, /* perturb */
-	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj)
+	RTFUNCTAB_FUNC_SCENE_OBJ_CAST(rt_generic_scene_obj),
+	NULL /* validate */
     },
 
 
@@ -2534,7 +2591,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	NULL, /* mat */
 	NULL, /* perturb */
-	NULL  /* scene_obj */
+	NULL  /* scene_obj */,
+	NULL /* validate */
     },
 
     {
@@ -2585,7 +2643,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	NULL, /* mat */
 	NULL, /* perturb */
-	NULL  /* scene_obj */
+	NULL  /* scene_obj */,
+	NULL /* validate */
     },
 
     {
@@ -2636,7 +2695,8 @@ const struct rt_functab OBJ[] = {
 	NULL, /* keypoint */
 	NULL, /* mat */
 	NULL, /* perturb */
-	NULL  /* scene_obj */
+	NULL  /* scene_obj */,
+	NULL /* validate */
     }
 };
 

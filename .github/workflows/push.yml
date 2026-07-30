@@ -92,7 +92,7 @@ jobs:
           cmake -E rm -rf bext_build
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: brlcad
 
@@ -198,7 +198,7 @@ jobs:
           rm -rf bext_build
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: brlcad
 
@@ -277,7 +277,7 @@ jobs:
           cmake -E rm -rf bext_build
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: brlcad
 
@@ -326,6 +326,12 @@ jobs:
     steps:
       - name: Setup - CMake
         uses: lukka/get-cmake@latest
+
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Add cl.exe to PATH
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Clone bext
         # Note - this will not check out any of the submodules unless we need
@@ -383,7 +389,7 @@ jobs:
           cmake -E rm -rf bext_build
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: brlcad
 
@@ -391,17 +397,64 @@ jobs:
         run: |
           cmake -E make_directory ./build_winstd
 
+      - name: MSVC and Ninja diagnostics
+        shell: cmd
+        run: |
+          where cmake
+          where ninja
+          where cl.exe
+          where msbuild
+          cmake --version
+          cl.exe
+          set INCLUDE
+          set LIB
+          set LIBPATH
+
       - name: Configure
         shell: cmd
         run: |
-          call "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
-          cmake -S brlcad -B build_winstd -DBRLCAD_EXT_PARALLEL=1 -DBRLCAD_BUNDLED_LIBS=Bundled -DCMAKE_BUILD_TYPE=Release -DBRLCAD_EXT_DIR=%GITHUB_WORKSPACE%\bext_output -DBRLCAD_ENABLE_QT=ON
+          cmake -S brlcad -B build_winstd -DBRLCAD_EXT_PARALLEL=1 -DBRLCAD_BUNDLED_LIBS=Bundled -DCMAKE_BUILD_TYPE=Release -DBRLCAD_EXT_DIR=%GITHUB_WORKSPACE%\bext_output -DBRLCAD_ENABLE_QT=ON -DBRLCAD_CONFIG_PROBE_DIAGNOSTICS=ON -DBRLCAD_PROBE_SNAPSHOT_FILE=%GITHUB_WORKSPACE%\build_winstd\parallel-probes.txt
+
+      - name: Configure probe diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          $build = Join-Path $env:GITHUB_WORKSPACE 'build_winstd'
+          $diagnosticDir = Join-Path $build 'CMakeTmp/probe_diagnostics'
+          if (Test-Path $diagnosticDir) {
+            Get-ChildItem -Path $diagnosticDir -File | Sort-Object Name | ForEach-Object {
+              Write-Host "`n===== $($_.FullName) ====="
+              Get-Content -Path $_.FullName
+            }
+          } else {
+            Write-Host "No parallel-probe diagnostic directory was created."
+          }
+          $cmakeError = Join-Path $build 'CMakeFiles/CMakeError.log'
+          if (Test-Path $cmakeError) {
+            Write-Host "`n===== $cmakeError ====="
+            Get-Content -Path $cmakeError
+          }
+          $cache = Join-Path $build 'CMakeCache.txt'
+          if (Test-Path $cache) {
+            Write-Host "`n===== selected cache entries ====="
+            Select-String -Path $cache -Pattern '^(HAVE_CONIO_H|BRLCAD_PROBE_USE_NINJA|BRLCAD_PROBE_NINJA_EXE|BRLCAD_PROBE_VCVARS|BRLCAD_PROBE_VCVARS_ARCH):' | ForEach-Object { $_.Line }
+          }
+
+      - name: Rebuild conio probe verbosely
+        if: always()
+        shell: cmd
+        continue-on-error: true
+        run: |
+          if not exist build_winstd\CMakeTmp\INCLUDE_PROBE_build (
+            echo INCLUDE_PROBE mini-project was not configured.
+            exit /b 0
+          )
+          cmake --build build_winstd\CMakeTmp\INCLUDE_PROBE_build --config Release --target HAVE_CONIO_H --verbose
 
       - name: Build
         id: build_parallel
         shell: cmd
         run: |
-          call "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
           cmake --build build_winstd --config Release -j2
         continue-on-error: true
 
@@ -409,18 +462,16 @@ jobs:
         if: steps.build_parallel.outcome == 'failure'
         shell: cmd
         run: |
-          cmake --build build_winstd --config Release mged
+          cmake --build build_winstd --config Release --target mged
 
       - name: Check
         shell: cmd
         run: |
-          call "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
           cmake --build build_winstd --config Release --target check -j2
 
       - name: Package
         shell: cmd
         run: |
-          call "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat"
           cmake --build build_winstd --config Release --target package -j2
 
   osx:
@@ -475,7 +526,7 @@ jobs:
           cmake -E rm -rf bext_build
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: brlcad
 

@@ -25,6 +25,8 @@
 
 #include "common.h"
 
+#include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
@@ -61,10 +63,43 @@ Usage: pix-bw [-s squaresize] [-w width] [-n height]\n\
               [ [-e ntsc|crt|hdtv|hdr|avg] [[-R red_weight] [-G green_weight] [-B blue_weight]] ]\n\
               [-o out_file.bw] [[<] file.pix] [> out_file.bw]\n";
 
+static int
+parse_positive_size_arg(const char *arg, size_t *value, const char *label)
+{
+    char *end = NULL;
+    long parsed = 0;
+
+    errno = 0;
+    parsed = strtol(arg, &end, 10);
+    if (arg[0] == '\0' || end == arg || *end != '\0' || errno != 0 || parsed <= 0 || parsed > INT_MAX) {
+	bu_log("pix-bw: invalid %s '%s'\n", label, arg);
+	return 0;
+    }
+
+    *value = (size_t)parsed;
+    return 1;
+}
+
+static int
+parse_double_arg(const char *arg, double *out_value, const char *label)
+{
+    char *end = NULL;
+
+    errno = 0;
+    *out_value = strtod(arg, &end);
+    if (arg[0] == '\0' || end == arg || *end != '\0' || errno != 0) {
+	bu_log("pix-bw: invalid %s '%s'\n", label, arg);
+	return 0;
+    }
+
+    return 1;
+}
+
 int
 get_args(int argc, char **argv)
 {
     int c;
+    int remaining = 0;
 
     bu_optind = 1;
     while ((c = bu_getopt(argc, argv, "e:s:w:n:R:G:B:o:h?")) != -1) {
@@ -103,27 +138,34 @@ get_args(int argc, char **argv)
 		break;
 	    case 'R' :
 		red++;
-		rweight = atof(bu_optarg);
+		if (!parse_double_arg(bu_optarg, &rweight, "red weight"))
+		    return 0;
 		break;
 	    case 'G' :
 		green++;
-		gweight = atof(bu_optarg);
+		if (!parse_double_arg(bu_optarg, &gweight, "green weight"))
+		    return 0;
 		break;
 	    case 'B' :
 		blue++;
-		bweight = atof(bu_optarg);
+		if (!parse_double_arg(bu_optarg, &bweight, "blue weight"))
+		    return 0;
 		break;
 	    case 'o' :
 		out_file = bu_optarg;
 		break;
             case 's' :
-               inx = iny = atoi(bu_optarg);
+	       if (!parse_positive_size_arg(bu_optarg, &inx, "input size"))
+		   return 0;
+	       iny = inx;
                break;
             case 'w' :
-               inx = atoi(bu_optarg);
+	       if (!parse_positive_size_arg(bu_optarg, &inx, "input width"))
+		   return 0;
                break;
             case 'n' :
-               iny = atoi(bu_optarg);
+	       if (!parse_positive_size_arg(bu_optarg, &iny, "input height"))
+		   return 0;
                break;
 	    default:		/* '?' 'h' */
 		return 0;
@@ -148,14 +190,15 @@ get_args(int argc, char **argv)
     } else {
 	in_file = argv[bu_optind];
 	bu_optind++;
-	if (!in_file || !bu_file_exists(in_file, NULL))
-	    return 0;
-	return 1;
     }
 
-    if (argc > ++bu_optind) {
-	bu_log("pix-bw: excess argument(s) ignored\n");
+    remaining = argc - bu_optind;
+    if (remaining != 0) {
+	bu_log("pix-bw: excess argument(s) not supported\n");
+	return 0;
     }
+    if (in_file != NULL && !bu_file_exists(in_file, NULL))
+	return 0;
 
     return 1;		/* OK */
 }

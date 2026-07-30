@@ -49,6 +49,7 @@
 #include <cstdlib>
 #include <cerrno>
 #include <csignal>
+#include <iostream>
 
 #ifdef _WIN32
 #  include <io.h>
@@ -59,6 +60,24 @@
 /* Config */
 static constexpr int STATUS_TIMEOUT_SECONDS = 4;
 static constexpr int MIN_PAGE_SCROLL = 1;
+
+static bool
+is_help_option(const char *argument)
+{
+    if (!argument)
+	return false;
+    const std::string option(argument);
+    return option == "-h" || option == "-?" || option == "--help";
+}
+
+static int
+print_usage(const char *program)
+{
+    std::cout << "Usage: " << (program ? program : "brledit")
+	<< " [file]\n"
+	<< "Edit a text file in the terminal.\n";
+    return 0;
+}
 
 /* Alternate screen RAII */
 struct AltScreenRAII {
@@ -770,6 +789,39 @@ static void event_loop(){
 }
 
 int main(int argc,char *argv[]){
+	for (int i = 1; i < argc; ++i) {
+	    if (is_help_option(argv[i]))
+		return print_usage(argv[0]);
+	}
+
+    const char *replace_file = std::getenv("BRLEDIT_REPLACE_FILE");
+    if (replace_file && replace_file[0] != '\0') {
+        if (argc < 2) {
+            std::cerr << "BRLEDIT_REPLACE_FILE requires a target file argument\n";
+            return 1;
+        }
+
+        std::ifstream src(replace_file, std::ios::binary);
+        if (!src) {
+            std::cerr << "Cannot open replacement file: " << replace_file << "\n";
+            return 1;
+        }
+
+        std::ofstream dst(argv[1], std::ios::binary | std::ios::trunc);
+        if (!dst) {
+            std::cerr << "Cannot open target file: " << argv[1] << "\n";
+            return 1;
+        }
+
+        dst << src.rdbuf();
+        if (!dst) {
+            std::cerr << "Failed writing target file: " << argv[1] << "\n";
+            return 1;
+        }
+
+        return 0;
+    }
+
     termio_save_tty(STDIN_FILENO);
 #ifndef _WIN32
     install_signals();

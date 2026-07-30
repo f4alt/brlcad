@@ -26,10 +26,12 @@
 #include "common.h"
 
 #include <sys/stat.h>  /* for file mode info in WRMODE */
+#include <string.h>
 
 #include "bio.h"
 #include "vmath.h"
 #include "bu/log.h"
+#include "bu/malloc.h"
 #include "icv_private.h"
 
 #define WRMODE S_IRUSR|S_IRGRP|S_IROTH
@@ -67,8 +69,13 @@ icv_normalize(icv_image_t *bif)
 	data++;
     }
     /* strict Condition for avoiding normalization */
-    if (max <= 1.0 || min >= 0.0)
+    if (max <= 1.0 && min >= 0.0)
 	return bif;
+
+    if (max - min < 1e-12) {
+	icv_sanitize(bif);
+	return bif;
+    }
 
     data = bif->data;
     m = 1/(max-min);
@@ -99,7 +106,14 @@ dpix_read(FILE *fp, size_t width, size_t height)
 	width = 512;
     }
 
+    if (width > 0 && height > (size_t)-1 / width / 3 / sizeof(double)) {
+	bu_log("dpix_read: dimensions excessively large, causing integer overflow\n");
+	return NULL;
+    }
+
     bif = icv_create(width, height, ICV_COLOR_SPACE_RGB);
+    if (!bif)
+	return NULL;
 
     /* Size in Bytes for reading. */
     size = width*height*3*sizeof(bif->data[0]);
@@ -124,25 +138,33 @@ dpix_read(FILE *fp, size_t width, size_t height)
 int
 dpix_write(icv_image_t *bif, FILE *fp)
 {
+    icv_image_t *wimg;
+
     if (UNLIKELY(!bif))
 	return BRLCAD_ERROR;
     if (UNLIKELY(!fp))
 	return BRLCAD_ERROR;
 
-    if (bif->color_space == ICV_COLOR_SPACE_GRAY) {
-	icv_gray2rgb(bif);
-    } else if (bif->color_space != ICV_COLOR_SPACE_RGB) {
+    wimg = icv_image_for_write(bif, ICV_COLOR_SPACE_RGB, 3);
+    if (!wimg) {
 	bu_log("dpix_write : Color Space conflict");
 	return BRLCAD_ERROR;
     }
 
-    size_t size = bif->width*bif->height*3*sizeof(bif->data[0]);
+    if (wimg->channels != 3) {
+	bu_log("dpix_write : Channel count conflict (expected 3, got %d)", (int)wimg->channels);
+	icv_destroy(wimg);
+	return BRLCAD_ERROR;
+    }
+
+    size_t size = wimg->width*wimg->height*3*sizeof(wimg->data[0]);
 
     // TODO - why does dpix use write instead of fwrite?
     int fd = fileno(fp);
-    size_t ret = write(fd, bif->data, size);
+    ssize_t ret = write(fd, wimg->data, size);
+    icv_destroy(wimg);
 
-    if (ret != size) {
+    if (ret < 0 || (size_t)ret != size) {
 	bu_log("dpix_write : Short Write");
 	return BRLCAD_ERROR;
     }
@@ -150,6 +172,73 @@ dpix_write(icv_image_t *bif, FILE *fp)
     return BRLCAD_OK;
 }
 
+int
+dpix_write_mem(icv_image_t *bif, unsigned char **outbuffer, size_t *outsize)
+{
+    icv_image_t *wimg;
+
+    if (UNLIKELY(!bif))
+	return BRLCAD_ERROR;
+    if (UNLIKELY(!outbuffer || !outsize))
+	return BRLCAD_ERROR;
+
+    wimg = icv_image_for_write(bif, ICV_COLOR_SPACE_RGB, 3);
+    if (!wimg) {
+	bu_log("dpix_write_mem : Color Space conflict");
+	return BRLCAD_ERROR;
+    }
+
+    if (wimg->channels != 3) {
+	bu_log("dpix_write_mem : Channel count conflict (expected 3, got %d)", (int)wimg->channels);
+	icv_destroy(wimg);
+	return BRLCAD_ERROR;
+    }
+
+    /* DPIX uses the raw double data directly */
+    *outsize = (size_t)wimg->width * wimg->height * 3 * sizeof(wimg->data[0]);
+    *outbuffer = (unsigned char *)bu_malloc(*outsize, "dpix_write_mem buffer");
+
+    memcpy(*outbuffer, wimg->data, *outsize);
+    icv_destroy(wimg);
+
+    return BRLCAD_OK;
+}
+
+icv_image_t *
+dpix_read_mem(const unsigned char *buffer, size_t size, size_t width, size_t height)
+{
+    if (UNLIKELY(!buffer || size == 0))
+	return NULL;
+
+    icv_image_t *bif;
+
+    if (width == 0 || height == 0) {
+	bu_log("dpix_read_mem: Using default size.\n");
+	height = 512;
+	width = 512;
+    }
+
+    if (width > 0 && height > (size_t)-1 / width / 3 / sizeof(double)) {
+	bu_log("dpix_read_mem: dimensions excessively large, causing integer overflow\n");
+	return NULL;
+    }
+
+    size_t expected_size = width * height * 3 * sizeof(double);
+    if (size < expected_size) {
+	bu_log("dpix_read_mem: Buffer size too small for dimensions\n");
+	return NULL;
+    }
+
+    bif = icv_create(width, height, ICV_COLOR_SPACE_RGB);
+    if (!bif)
+	return NULL;
+
+    memcpy(bif->data, buffer, expected_size);
+
+    icv_normalize(bif);
+
+    return bif;
+}
 
 /*
  * Local Variables:

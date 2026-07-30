@@ -328,7 +328,7 @@ WDB_EXPORT int mk_metaball(
     const size_t nctlpt,	/* number of control points */
     const int method,		/* metaball rendering method */
     const fastf_t threshold,
-    const fastf_t *verts[5]);	/* X, Y, Z, fldstr, goo/Beta */
+    const fastf_t *verts[5]);	/* X, Y, Z, field_strength, blobbiness */
 
 /**
  * Caller is responsible for freeing eqn[]
@@ -637,6 +637,30 @@ WDB_EXPORT void mk_add_pipe_pnt(
  */
 WDB_EXPORT void mk_pipe_init(struct bu_list *headp);
 
+/**
+ * Make a point set (pnts) primitive of the given rt_pnt_type from count
+ * points.  verts is count*3 coordinates; colors (count*3 unsigned char
+ * RGB), scales (count), and normals (count*3) are required iff the type
+ * carries that attribute, else NULL.  scale sets the default display scale.
+ *
+ * @return <0 error, 0 success
+ */
+WDB_EXPORT int mk_pnts(struct rt_wdb *fp, const char *name, rt_pnt_type type,
+		       double scale, size_t count, const fastf_t *verts,
+		       const unsigned char *colors, const fastf_t *scales,
+		       const fastf_t *normals);
+
+/**
+ * Make a datum object from a caller-built, NULL-terminated next-linked
+ * chain of rt_datum_internal elements (point: dir=0,w=0; line: pnt+dir,w=0;
+ * plane: w!=0).  The chain is duplicated internally; the caller retains
+ * ownership of head.
+ *
+ * @return <0 error, 0 success
+ */
+WDB_EXPORT int mk_datums(struct rt_wdb *fp, const char *name,
+			 struct rt_datum_internal *head);
+
 
 /**
  * Displacement map primitive.
@@ -645,10 +669,24 @@ WDB_EXPORT extern int mk_dsp(struct rt_wdb *fp, const char *name, const char *fi
 			     size_t xdim, size_t ydim, const matp_t mat);
 
 /**
+ * Displacement map primitive sourced from an in-database BINUNIF object
+ * (created via mk_binunif) rather than an external file.
+ */
+WDB_EXPORT extern int mk_dsp_obj(struct rt_wdb *fp, const char *name, const char *binunif,
+				 size_t xcnt, size_t ycnt, const matp_t stom);
+
+/**
  * Extruded bitmap primitive.
  */
 WDB_EXPORT extern int mk_ebm(struct rt_wdb *fp, const char *name, const char *file,
 			     size_t xdim, size_t ydim, fastf_t tallness, const matp_t mat);
+
+/**
+ * Extruded bitmap primitive sourced from an in-database BINUNIF object
+ * (created via mk_binunif) rather than an external file.
+ */
+WDB_EXPORT extern int mk_ebm_obj(struct rt_wdb *fp, const char *name, const char *binunif,
+				 size_t xdim, size_t ydim, fastf_t tallness, const matp_t mat);
 
 /**
  * Heart primitive.
@@ -773,7 +811,7 @@ WDB_EXPORT int mk_region1(
  *
  * @return -1 error, 0 OK
  */
-WDB_EXPORT extern int mk_conversion(char *units_string);
+WDB_EXPORT extern int mk_conversion(const char *units_string);
 
 /**
  * Establish a new conversion factor for LIBWDB routines.

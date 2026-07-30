@@ -623,6 +623,8 @@ test_opt_cut_plane(void)
 {
     extern int do_kut_plane;
     extern plane_t kut_plane;
+    const double inv_sqrt3 = 1.0 / sqrt(3.0);
+    const double sqrt3 = sqrt(3.0);
     reset_globals();
     /* Normal vector (1,0,0) at dist=5 */
     MAKE_ARGV(av, "rt", "-k", "1,0,0,5");
@@ -638,6 +640,51 @@ test_opt_cut_plane(void)
     CALL_GET_ARGS(av2, 1);
     CHECK_INT("--cut-plane", 1, do_kut_plane);
     CHECK_DBL("--cut-plane Y normal", 1.0, kut_plane[1]);
+
+    reset_globals();
+    MAKE_ARGV(av3, "rt", "-k", "1,2,3,0,0,2");
+    CALL_GET_ARGS(av3, 1);
+    CHECK_INT("-k point+normal do_kut_plane", 1, do_kut_plane);
+    CHECK_DBL("-k point+normal kut_plane[0]", 0.0, kut_plane[0]);
+    CHECK_DBL("-k point+normal kut_plane[1]", 0.0, kut_plane[1]);
+    CHECK_DBL("-k point+normal kut_plane[2]", 1.0, kut_plane[2]);
+    CHECK_DBL("-k point+normal kut_plane[W]", 3.0, kut_plane[W]);
+
+    reset_globals();
+    MAKE_ARGV(av4, "rt", "--cut-plane", "4, 0, 0, 3, 0, 0");
+    CALL_GET_ARGS(av4, 1);
+    CHECK_INT("--cut-plane point+normal", 1, do_kut_plane);
+    CHECK_DBL("--cut-plane point+normal kut_plane[0]", 1.0, kut_plane[0]);
+    CHECK_DBL("--cut-plane point+normal kut_plane[1]", 0.0, kut_plane[1]);
+    CHECK_DBL("--cut-plane point+normal kut_plane[2]", 0.0, kut_plane[2]);
+    CHECK_DBL("--cut-plane point+normal kut_plane[W]", 4.0, kut_plane[W]);
+
+    reset_globals();
+    MAKE_ARGV(av5, "rt", "-k", "1,1,1,1,1,1");
+    CALL_GET_ARGS(av5, 1);
+    CHECK_INT("-k diagonal point+normal", 1, do_kut_plane);
+    CHECK_DBL("-k diagonal point+normal kut_plane[0]", inv_sqrt3, kut_plane[0]);
+    CHECK_DBL("-k diagonal point+normal kut_plane[1]", inv_sqrt3, kut_plane[1]);
+    CHECK_DBL("-k diagonal point+normal kut_plane[2]", inv_sqrt3, kut_plane[2]);
+    CHECK_DBL("-k diagonal point+normal kut_plane[W]", sqrt3, kut_plane[W]);
+
+    reset_globals();
+    MAKE_ARGV(av6, "rt", "-k", "-500,0,0");
+    CALL_GET_ARGS(av6, 1);
+    CHECK_INT("-k point-vector shorthand", 1, do_kut_plane);
+    CHECK_DBL("-k point-vector shorthand kut_plane[0]", -1.0, kut_plane[0]);
+    CHECK_DBL("-k point-vector shorthand kut_plane[1]", 0.0, kut_plane[1]);
+    CHECK_DBL("-k point-vector shorthand kut_plane[2]", 0.0, kut_plane[2]);
+    CHECK_DBL("-k point-vector shorthand kut_plane[W]", 500.0, kut_plane[W]);
+
+    reset_globals();
+    MAKE_ARGV(av7, "rt", "--cut-plane", "0, 6, 8");
+    CALL_GET_ARGS(av7, 1);
+    CHECK_INT("--cut-plane point-vector shorthand", 1, do_kut_plane);
+    CHECK_DBL("--cut-plane point-vector shorthand kut_plane[0]", 0.0, kut_plane[0]);
+    CHECK_DBL("--cut-plane point-vector shorthand kut_plane[1]", 0.6, kut_plane[1]);
+    CHECK_DBL("--cut-plane point-vector shorthand kut_plane[2]", 0.8, kut_plane[2]);
+    CHECK_DBL("--cut-plane point-vector shorthand kut_plane[W]", 10.0, kut_plane[W]);
 }
 
 
@@ -662,8 +709,6 @@ static void
 test_opt_light_model(void)
 {
     extern int lightmodel;
-    extern double pmargs[9];
-    extern char pmfile[255];
 
     /* Simple model selection */
     reset_globals();
@@ -1321,7 +1366,6 @@ test_opt_white_bg(void)
 static void
 test_opt_bgcolor(void)
 {
-    extern int default_background;
     /* We just check it doesn't crash and returns success */
     reset_globals();
     MAKE_ARGV(av, "rt", "-C", "255/0/0");
@@ -1369,7 +1413,6 @@ test_opt_unknown(void)
 static void
 test_optind_boundary(void)
 {
-    extern int matflag;
     /* Options + model.g + object: bu_optind should point at argv[3] */
     reset_globals();
     {

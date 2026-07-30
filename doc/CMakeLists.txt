@@ -1,4 +1,5 @@
 verbose_add_subdirectory(doc asciidoc)
+verbose_add_subdirectory(doc changes)
 verbose_add_subdirectory(doc html)
 verbose_add_subdirectory(doc legal)
 
@@ -16,6 +17,7 @@ set(
   README.VAX
   checklist.txt
   description.txt
+  optimization_ideas.adoc
   notes/TODO.BREP
   notes/TODO.shaded_displays
   notes/apitrace.txt

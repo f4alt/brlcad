@@ -109,7 +109,7 @@ dm_graphics_system(const char *dmtype)
 }
 
 
-static const char *priority_list[] = {"wgl", "ogl", "X", NULL};
+static const char *priority_list[] = {"wgl", "ogl", "tkswrast", "X", NULL};
 
 
 extern "C" void
@@ -420,6 +420,12 @@ fb_open(const char *file, int width, int height)
 		    b = device;
 		    continue;
 		}
+		if (dm_valid_type(priority_list[i], NULL) != 1) {
+		    i++;
+		    snprintf(device, sizeof(device), "/dev/%s", priority_list[i]);
+		    b = device;
+		    continue;
+		}
 		const struct fb *f = f_it->second;
 		*ifp->i = *(f->i);          /* struct copy */
 		file = ifp->i->if_name;
@@ -536,4 +542,3 @@ fb_genhelp(void)
 // c-file-style: "stroustrup"
 // End:
 // ex: shiftwidth=4 tabstop=8
-

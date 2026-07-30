@@ -58,13 +58,11 @@ extern FILE *fdopen(int fd, const char *mode);
 #endif
 
 /***** Variables shared with viewing model *** */
-extern FILE *outfp;			/* optional pixel output file */
 extern mat_t view2model;
 extern mat_t model2view;
 /***** end of sharing with viewing model *****/
 
 /***** variables shared with opt.c *****/
-extern int	orientflag;		/* 1 means orientation has been set */
 /***** end variables shared with opt.c *****/
 
 /***** variables shared with rt.c *****/
@@ -73,7 +71,7 @@ extern char *string_pix_end;	/* string spec of ending pixel */
 extern int finalframe;		/* frame to halt at */
 /***** end variables shared with rt.c *****/
 
-void def_tree(register struct rt_i *rtip);
+int def_tree(register struct rt_i *rtip, const char **first_obj);
 void do_ae(double azim, double elev);
 void res_pr(void);
 void memory_summary(void);
@@ -151,12 +149,10 @@ old_way(FILE *fp)
     }
     bu_log("Interpreting command stream in old format\n");
 
-    /* Committing to old way - better have objv ready */
-    if (!objv) {
+    /* Committing to old way - better have trees ready */
+    if (!def_tree(APP.a_rt_i, NULL)) {
 	return -1;
     }
-
-    def_tree(APP.a_rt_i);	/* Load the default trees */
 
     curframe = 0;
     do {
@@ -305,8 +301,8 @@ int cm_end(const int UNUSED(argc), const char **UNUSED(argv))
 {
     struct rt_i *rtip = APP.a_rt_i;
 
-    if (rtip && BU_LIST_IS_EMPTY(&rtip->HeadRegion)) {
-	def_tree(rtip);		/* Load the default trees */
+    if (rtip && BU_LIST_IS_EMPTY(&rtip->HeadRegion) && !def_tree(rtip, NULL)) {
+	return -1;
     }
 
     /* If no matrix or az/el specified yet, use params from cmd line */
@@ -391,6 +387,38 @@ int cm_prep(const int UNUSED(argc), const char **UNUSED(argv))
     return 0;
 }
 
+/* Object list for the "autoview" command: render the full tree but
+ * auto-size the view to frame only these objects.  The object list is
+ * captured at -c parse time (when the rtip is not yet available) and
+ * consumed later in do_ae() after the database is open.
+ */
+static int autoview_argc = 0;
+static char **autoview_argv = NULL;
+
+int cm_autoview(const int argc, const char **argv)
+{
+    int i;
+
+    if (argc <= 1)
+	return -1;
+
+    /* free any prior list */
+    if (autoview_argv) {
+	for (i = 0; i < autoview_argc; i++)
+	    bu_free(autoview_argv[i], "autoview obj");
+	bu_free((void *)autoview_argv, "autoview_argv");
+	autoview_argv = NULL;
+    }
+    autoview_argc = 0;
+
+    autoview_argv = (char **)bu_calloc(argc - 1, sizeof(char *), "autoview_argv");
+    for (i = 1; i < argc; i++)
+	autoview_argv[i - 1] = bu_strdup(argv[i]);
+    autoview_argc = argc - 1;
+
+    return 0;
+}
+
 int cm_tree(const int argc, const char **argv)
 {
     int i = 0;
@@ -428,8 +456,8 @@ int cm_multiview(const int UNUSED(argc), const char **UNUSED(argv))
 	60, 60, 60, 60, 60, 60, 60
     };
 
-    if (rtip && BU_LIST_IS_EMPTY(&rtip->HeadRegion)) {
-	def_tree(rtip);		/* Load the default trees */
+    if (rtip && BU_LIST_IS_EMPTY(&rtip->HeadRegion) && !def_tree(rtip, NULL)) {
+	return -1;
     }
     for (i = 0; i < (sizeof(a)/sizeof(a[0])); i++) {
 	do_ae((double)a[i], (double)e[i]);
@@ -477,7 +505,7 @@ int cm_clean(const int UNUSED(argc), const char **UNUSED(argv))
  */
 int cm_closedb(const int UNUSED(argc), const char **UNUSED(argv))
 {
-    rt_free_rti(APP.a_rt_i);
+    rt_i_destroy(APP.a_rt_i);
     APP.a_rt_i = RTI_NULL;
 
     bu_exit(0, "After _closedb");
@@ -494,8 +522,6 @@ parse_deprecated(const struct bu_structparse *UNUSED(sp), const char *name, void
 }
 
 
-/* viewing module specific variables */
-extern struct bu_structparse view_parse[];
 static int rt_bot_minpieces_deprecated = 0;
 
 /* Per-application CLINE beam radius override.  Negative means "no override".
@@ -567,22 +593,78 @@ int cm_opt(const int argc, const char **argv)
 }
 
 
+static int
+rtuif_tree_list(register struct rt_i *rtip, int *treec, const char ***treev, const char **first_obj)
+{
+    static const char *default_objv[2] = {NULL, NULL};
+    struct bu_vls msg = BU_VLS_INIT_ZERO;
+    struct directory *dp = RT_DIR_NULL;
+    int ret = 0;
+
+    if (treec)
+	*treec = 0;
+    if (treev)
+	*treev = NULL;
+    if (first_obj)
+	*first_obj = NULL;
+
+    if (objv && objc > 0) {
+	if (treec)
+	    *treec = objc;
+	if (treev)
+	    *treev = (const char **)objv;
+	if (first_obj)
+	    *first_obj = objv[0];
+	return 1;
+    }
+
+    if (!rtip)
+	return 0;
+
+    ret = db_default_object(rtip->rti_dbip, &dp, &msg);
+    if (ret == 1) {
+	default_objv[0] = dp->d_namep;
+	default_objv[1] = NULL;
+	if (treec)
+	    *treec = 1;
+	if (treev)
+	    *treev = default_objv;
+	if (first_obj)
+	    *first_obj = default_objv[0];
+    } else if (bu_vls_strlen(&msg)) {
+	bu_log("%s", bu_vls_cstr(&msg));
+    }
+
+    bu_vls_free(&msg);
+    return (ret == 1) ? 1 : 0;
+}
+
+
 /**
- * Load default tree list, from command line.
+ * Load the active tree list from explicit objects or an automatic default.
+ *
+ * Returns non-zero when one or more objects were available and tree loading
+ * was attempted.  Returns 0 when no explicit objects were provided and no
+ * deterministic default object could be resolved.
  */
-void
-def_tree(register struct rt_i *rtip)
+int
+def_tree(register struct rt_i *rtip, const char **first_obj)
 {
     struct bu_vls times = BU_VLS_INIT_ZERO;
+    const char **treev = NULL;
+    int treec = 0;
 
     RT_CK_RTI(rtip);
+
+    if (!rtuif_tree_list(rtip, &treec, &treev, first_obj))
+	return 0;
 
     /* propagate any app-level CLINE beam radius override to this rtip */
     rtip->rti_max_beam_radius = rt_app_cline_radius;
 
     rt_prep_timer();
-    if (rt_gettrees(rtip, objc, (const char **)objv, (size_t)npsw) < 0) {
-	bu_log("rt_gettrees(%s) FAILED\n", (objv && objv[0]) ? objv[0] : "ERROR");
+    if (rt_gettrees(rtip, treec, treev, (size_t)npsw) < 0) {
+	bu_log("rt_gettrees(%s) FAILED\n", (treev && treev[0]) ? treev[0] : "ERROR");
     }
     (void)rt_get_timer(&times, NULL);
 
@@ -590,6 +672,8 @@ def_tree(register struct rt_i *rtip)
 	bu_log("GETTREE: %s\n", bu_vls_addr(&times));
     bu_vls_free(&times);
     memory_summary();
+
+    return 1;
 }
 
 
@@ -772,7 +856,9 @@ do_prep(struct rt_i *rtip)
     if (rt_verbosity & VERBOSE_STATS) {
 	bu_log("%s: %zu cut, %zu box (%zu empty)\n",
 	       rtip->rti_space_partition == RT_PART_NUBSPT ?
-	       "NUBSP" : "unknown",
+	       "NUBSP" :
+	       rtip->rti_space_partition == RT_PART_NULL ?
+	       "NULL" : "unknown",
 	       rtip->stats.rti_ncut_by_type[CUT_CUTNODE],
 	       rtip->stats.rti_ncut_by_type[CUT_BOXNODE],
 	       rtip->stats.nempty_cells);
@@ -950,7 +1036,9 @@ do_frame(int framenumber)
 	    snprintf(framename, 256, "%s.%d", outputfile, framenumber);
 	}
 
-#ifdef HAVE_SYS_STAT_H
+	/* Raw view output is not RGB data and cannot use the RGB restart
+	 * buffer. */
+#if defined(HAVE_SYS_STAT_H) && !defined(RT_RAW_OUTPUT)
 	/*
 	 * This code allows the computation of a particular frame to a
 	 * disk file to be resumed automatically.  This is worthwhile
@@ -1013,20 +1101,24 @@ do_frame(int framenumber)
 
 	/* Ordinary case for creating output file */
 	if (outfp == NULL) {
-#ifndef RT_TXT_OUTPUT
+#if !defined(RT_TXT_OUTPUT) && !defined(RT_RAW_OUTPUT)
 	    /* FIXME: in the case of rtxray, this is wrong.  it writes
 	     * out a bw image so depth should be just 1, not 3.
 	     */
 	    bif = icv_create(width, height, ICV_COLOR_SPACE_RGB);
 
-	    if (bif == NULL && (outfp = fopen(framename, "w+b")) == NULL) {
-		perror(framename);
+	    if (bif == NULL) {
+		bu_log("failed to create icv image for output\n");
 		if (matflag)
 		    return 0;	/* OK */
 		return -1;			/* Bad */
 	    }
 #else
-	    outfp = fopen(framename, "w");
+	    const char *output_mode = "w";
+#  ifdef RT_RAW_OUTPUT
+	    output_mode = "wb";
+#  endif
+	    outfp = fopen(framename, output_mode);
 	    if (outfp == NULL) {
 		perror(framename);
 		if (matflag)
@@ -1183,7 +1275,7 @@ do_frame(int framenumber)
 	    if (rtip->rti_dbip && rtip->rti_dbip->dbi_filename)
 		ri->db_filename = bu_strdup(rtip->rti_dbip->dbi_filename);
 
-	    /* Object list: prefer cmd_objs (dynamic draw list), fall back to objv */
+	    /* Object list: prefer cmd_objs (dynamic draw list), fall back to the active tree list */
 	    {
 		struct bu_vls objs_str = BU_VLS_INIT_ZERO;
 		if (cmd_objs && BU_PTBL_LEN(cmd_objs) > 0) {
@@ -1193,11 +1285,17 @@ do_frame(int framenumber)
 			if (j) bu_vls_putc(&objs_str, ' ');
 			bu_vls_strcat(&objs_str, o);
 		    }
-		} else if (objv && objc > 0) {
+		} else {
+		    const char **treev = NULL;
+		    int treec = 0;
 		    int j;
-		    for (j = 0; j < objc; j++) {
+
+		    if (!rtuif_tree_list(rtip, &treec, &treev, NULL))
+			treec = 0;
+
+		    for (j = 0; j < treec; j++) {
 			if (j) bu_vls_putc(&objs_str, ' ');
-			bu_vls_strcat(&objs_str, objv[j]);
+			bu_vls_strcat(&objs_str, treev[j]);
 		    }
 		}
 		if (bu_vls_strlen(&objs_str))
@@ -1212,7 +1310,10 @@ do_frame(int framenumber)
 	    ri->aspect      = aspect;
 	    ri->perspective = rt_perspective;
 
-	    icv_image_set_render_info(bif, ri);
+	    if (icv_image_set_render_info(bif, ri) != 0) {
+		icv_render_info_destroy(ri);
+		ri = NULL;
+	    }
 	}
 
 	icv_write(bif, framename, BU_MIME_IMAGE_AUTO);
@@ -1287,6 +1388,7 @@ do_ae(double azim, double elev)
     vect_t temp;
     mat_t toEye;
     struct rt_i *rtip = APP.a_rt_i;
+    point_t view_min, view_max;
 
     if (rtip == NULL)
 	return;
@@ -1296,7 +1398,12 @@ do_ae(double azim, double elev)
 	VSETALL(rtip->mdl_min, -1);
     }
     if (rtip->mdl_max[X] <= -INFINITY) {
-	bu_log("do_ae: infinite model bounds? setting a unit maximum\n");
+	/* Model not yet loaded (librt initial state: mdl_min=+INF, mdl_max=-INF).
+	 * Reset both bounds to a unit box so that autoviewsize() does not
+	 * propagate +INFINITY through mdl_min into cell_width (which causes a
+	 * bu_bomb("bad cell size") crash when work is dispatched). */
+	bu_log("do_ae: infinite model bounds? setting unit bounds\n");
+	VSETALL(rtip->mdl_min, -1);
 	VSETALL(rtip->mdl_max, 1);
     }
 
@@ -1313,17 +1420,35 @@ do_ae(double azim, double elev)
     rtip->mdl_max[Y] = ceil(rtip->mdl_max[Y]);
     rtip->mdl_max[Z] = ceil(rtip->mdl_max[Z]);
 
+    /* By default, frame the whole model.  If the "autoview" command
+     * supplied a subset of objects, frame only that subset's bounding
+     * box (while still rendering the full prepped tree).
+     */
+    VMOVE(view_min, rtip->mdl_min);
+    VMOVE(view_max, rtip->mdl_max);
+    if (autoview_argc > 0) {
+	point_t sub_min, sub_max;
+	if (rt_obj_bounds(NULL, rtip->rti_dbip, autoview_argc,
+			  (const char **)autoview_argv, use_air,
+			  sub_min, sub_max) == BRLCAD_OK) {
+	    VMOVE(view_min, sub_min);
+	    VMOVE(view_max, sub_max);
+	} else {
+	    bu_log("do_ae: autoview bounds failed; framing whole model\n");
+	}
+    }
+
     MAT_IDN(Viewrotscale);
     bn_mat_angles(Viewrotscale, 270.0+elev, 0.0, 270.0-azim);
 
-    /* Look at the center of the model */
+    /* Look at the center of the (sub)view bounding box */
     MAT_IDN(toEye);
-    toEye[MDX] = -((rtip->mdl_max[X]+rtip->mdl_min[X])/2.0);
-    toEye[MDY] = -((rtip->mdl_max[Y]+rtip->mdl_min[Y])/2.0);
-    toEye[MDZ] = -((rtip->mdl_max[Z]+rtip->mdl_min[Z])/2.0);
+    toEye[MDX] = -((view_max[X]+view_min[X])/2.0);
+    toEye[MDY] = -((view_max[Y]+view_min[Y])/2.0);
+    toEye[MDZ] = -((view_max[Z]+view_min[Z])/2.0);
 
-    /* determine global viewsize based on model size */
-    viewsize = autoviewsize(rtip->mdl_min, rtip->mdl_max, aspect);
+    /* determine global viewsize based on the (sub)view bounding box */
+    viewsize = autoviewsize(view_min, view_max, aspect);
 
     Viewrotscale[15] = 0.5*viewsize;	/* Viewscale */
     bn_mat_mul(model2view, Viewrotscale, toEye);
@@ -1378,6 +1503,8 @@ struct command_tab rt_do_tab[] = {
      cm_anim,	4, 999},
     {"tree", 	"treetop(s)", "specify alternate list of tree tops",
      cm_tree,	1, 999},
+    {"autoview", "obj(s)", "auto-size view to fit named objects",
+     cm_autoview,	2, 999},
     {"draw", 	"obj", "add an object to the active list",
      cm_draw,	2, 999},
     {"erase", 	"obj", "remove an object from the active list",

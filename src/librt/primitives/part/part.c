@@ -212,7 +212,7 @@ struct part_specific {
 #define RT_PARTICLE_SURF_BODY 2
 #define RT_PARTICLE_SURF_HSPHERE 3
 
-const struct bu_structparse rt_part_parse[] = {
+EXTERNCPP const struct bu_structparse rt_part_parse[] = {
     { "%f", 3, "V", bu_offsetofarray(struct rt_part_internal, part_V, fastf_t, X), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
     { "%f", 3, "H", bu_offsetofarray(struct rt_part_internal, part_H, fastf_t, X), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
     { "%f", 1, "r_v", bu_offsetof(struct rt_part_internal, part_vrad), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
@@ -270,7 +270,7 @@ clt_part_pack(struct bu_pool *pool, struct soltab *stp)
 /**
  * Compute the bounding RPP for a particle
  */
-int
+C_DECL int
 rt_part_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct bn_tol *UNUSED(tol)) {
     struct rt_part_internal *pip;
     vect_t tip_pt, tmp_min, tmp_max;
@@ -317,7 +317,7 @@ rt_part_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct
  * A struct part_specific is created, and its address is stored in
  * stp->st_specific for use by part_shot().
  */
-int
+C_DECL int
 rt_part_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 {
     register struct part_specific *part;
@@ -355,7 +355,7 @@ rt_part_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 
     /* Compute some essential terms */
     hlen_sq = MAGSQ(pip->part_H);
-    if (hlen_sq <= SMALL) {
+    if (hlen_sq <= SQRT_SMALL_FASTF) {
 	bu_log("part(%s): 0-length H vector\n", stp->st_dp->d_namep);
 	return 1;		/* BAD */
     }
@@ -451,7 +451,7 @@ rt_part_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 }
 
 
-void
+C_DECL void
 rt_part_print(register const struct soltab *stp)
 {
     register const struct part_specific *part =
@@ -492,7 +492,7 @@ rt_part_print(register const struct soltab *stp)
  * 0 MISS
  * >0 HIT
  */
-int
+C_DECL int
 rt_part_shot(struct soltab *stp, register struct xray *rp, struct application *ap, struct seg *seghead)
 {
     register struct part_specific *part =
@@ -781,9 +781,320 @@ rt_part_shot(struct soltab *stp, register struct xray *rp, struct application *a
 
 
 /**
+ * Vectorized counterpart to rt_part_shot().
+ *
+ * Intersect a batch of n rays, each against its own part soltab, writing
+ * exactly one seg per ray into the caller-supplied flat segp[] array.  A
+ * miss is flagged with segp[i].seg_stp == NULL; stp[i] == NULL signals a
+ * ray to skip.
+ *
+ * Unlike the scalar shot, no seg is acquired from the resource free list
+ * and no seg-list linkage is performed: results stream directly into the
+ * contiguous segp[] array.  Eliminating that per-hit allocation and list
+ * traffic is the data-coherency benefit of batching.  The per-ray
+ * arithmetic is a verbatim copy of rt_part_shot() so the two paths agree
+ * to the bit; hit_vpriv/hit_surfno are preserved for rt_part_norm().  A
+ * particle is convex, so the >2-hit collapse via primitive_hitsort() is
+ * retained to yield the single entry/exit span.
+ */
+C_DECL void
+rt_part_vshot(struct soltab **stp, struct xray **rp, struct seg *segp, int n, struct application *ap)
+/* An array of solid pointers */
+/* An array of ray pointers */
+/* array of segs (results returned) */
+/* Number of ray/object pairs */
+{
+    int i;
+
+    if (ap) RT_CK_APPLICATION(ap);
+
+    for (i = 0; i < n; i++) {
+	register struct part_specific *part;
+	vect_t dprime;		/* D' */
+	point_t pprime;		/* P' */
+	point_t xlated;		/* translated ray start point */
+	fastf_t t1, t2;		/* distance constants of solution */
+	fastf_t f;
+	struct hit hits[4];	/* 4 potential hit points */
+	register struct hit *hitp;
+	int check_v, check_h;
+
+	if (stp[i] == 0) continue;		/* skip this ray */
+	segp[i].seg_stp = (struct soltab *)0;	/* assume MISS */
+
+	part = (struct part_specific *)stp[i]->st_specific;
+	hitp = &hits[0];
+
+	if (part->part_int.part_type == RT_PARTICLE_TYPE_SPHERE) {
+	    vect_t ov;		/* ray origin to center (V - P) */
+	    fastf_t vrad_sq;
+	    fastf_t magsq_ov;	/* length squared of ov */
+	    fastf_t b;		/* second term of quadratic eqn */
+	    fastf_t root;	/* root of radical */
+
+	    VSUB2(ov, part->part_int.part_V, rp[i]->r_pt);
+	    b = VDOT(rp[i]->r_dir, ov);
+	    magsq_ov = MAGSQ(ov);
+
+	    if (magsq_ov >= (vrad_sq = part->part_int.part_vrad *
+			     part->part_int.part_vrad)) {
+		/* ray origin is outside of sphere */
+		if (b < 0) {
+		    /* ray direction is away from sphere */
+		    continue;		/* No hit */
+		}
+		root = b*b - magsq_ov + vrad_sq;
+		if (root <= 0) {
+		    /* no real roots */
+		    continue;		/* No hit */
+		}
+	    } else {
+		root = b*b - magsq_ov + vrad_sq;
+	    }
+	    root = sqrt(root);
+
+	    segp[i].seg_stp = stp[i];
+
+	    /* we know root is positive, so we know the smaller t */
+	    segp[i].seg_in.hit_magic = RT_HIT_MAGIC;
+	    segp[i].seg_in.hit_dist = b - root;
+	    segp[i].seg_in.hit_surfno = RT_PARTICLE_SURF_VSPHERE;
+	    segp[i].seg_out.hit_magic = RT_HIT_MAGIC;
+	    segp[i].seg_out.hit_dist = b + root;
+	    segp[i].seg_out.hit_surfno = RT_PARTICLE_SURF_VSPHERE;
+	    continue;			/* HIT */
+	}
+
+	/* Transform ray to coordinate system of unit cone at origin */
+	MAT4X3VEC(dprime, part->part_SoR, rp[i]->r_dir);
+	VSUB2(xlated, rp[i]->r_pt, part->part_int.part_V);
+	MAT4X3VEC(pprime, part->part_SoR, xlated);
+
+	if (ZERO(dprime[X]) && ZERO(dprime[Y])) {
+	    check_v = check_h = 1;
+	    goto check_hemispheres;
+	}
+	check_v = check_h = 0;
+
+	/* Find roots of the equation, using formula for quadratic */
+	/* Note that vrad' = 1 and hrad' = hrad/vrad */
+	if (part->part_int.part_type == RT_PARTICLE_TYPE_CYLINDER) {
+	    /* Cylinder case, hrad == vrad, m = 0 */
+	    fastf_t a, b, c;
+	    fastf_t root;		/* root of radical */
+
+	    a = dprime[X]*dprime[X] + dprime[Y]*dprime[Y];
+	    b = dprime[X]*pprime[X] + dprime[Y]*pprime[Y];
+	    c = pprime[X]*pprime[X] + pprime[Y]*pprime[Y] - 1;
+	    if ((root = b*b - a * c) <= 0)
+		goto check_hemispheres;
+	    root = sqrt(root);
+	    t1 = (root-b) / a;
+	    t2 = -(root+b) / a;
+	} else {
+	    /* Cone case */
+	    fastf_t a, b, c;
+	    fastf_t root;		/* root of radical */
+	    fastf_t m, msq;
+
+	    m = part->part_hrad_prime - part->part_vrad_prime;
+
+	    /* This quadratic has had a factor of 2 divided out of "b"
+	     * throughout.  More efficient, but the same answers.
+	     */
+	    a = dprime[X]*dprime[X] + dprime[Y]*dprime[Y] -
+		(msq = m*m) * dprime[Z]*dprime[Z];
+	    b = dprime[X]*pprime[X] + dprime[Y]*pprime[Y] -
+		msq * dprime[Z]*pprime[Z] -
+		m * dprime[Z];		/* * part->part_vrad_prime */
+	    c = pprime[X]*pprime[X] + pprime[Y]*pprime[Y] -
+		msq * pprime[Z]*pprime[Z] -
+		2 * m * pprime[Z] - 1;
+	    /* was: ... -2m * vrad' * Pz' - vrad'**2 */
+
+	    if ((root = b*b - a * c) <= 0)
+		goto check_hemispheres;
+	    root = sqrt(root);
+
+	    t1 = (root-b) / a;
+	    t2 = -(root+b) / a;
+	}
+
+	/*
+	 * t1 and t2 are potential solutions to intersection with side.
+	 * Find hit' point, see if Z values fall in range.
+	 */
+	if ((f = pprime[Z] + t1 * dprime[Z]) >= part->part_v_hdist) {
+	    check_h = 1;		/* may also hit off end */
+	    if (f <= part->part_h_hdist) {
+		hitp->hit_magic = RT_HIT_MAGIC;
+		/** VJOIN1(hitp->hit_vpriv, pprime, t1, dprime); **/
+		hitp->hit_vpriv[X] = pprime[X] + t1 * dprime[X];
+		hitp->hit_vpriv[Y] = pprime[Y] + t1 * dprime[Y];
+		hitp->hit_vpriv[Z] = f;
+		hitp->hit_dist = t1;
+		hitp->hit_surfno = RT_PARTICLE_SURF_BODY;
+		hitp++;
+	    }
+	} else {
+	    check_v = 1;
+	}
+
+	if ((f = pprime[Z] + t2 * dprime[Z]) >= part->part_v_hdist) {
+	    check_h = 1;		/* may also hit off end */
+	    if (f <= part->part_h_hdist) {
+		hitp->hit_magic = RT_HIT_MAGIC;
+		/** VJOIN1(hitp->hit_vpriv, pprime, t2, dprime); **/
+		hitp->hit_vpriv[X] = pprime[X] + t2 * dprime[X];
+		hitp->hit_vpriv[Y] = pprime[Y] + t2 * dprime[Y];
+		hitp->hit_vpriv[Z] = f;
+		hitp->hit_dist = t2;
+		hitp->hit_surfno = RT_PARTICLE_SURF_BODY;
+		hitp++;
+	    }
+	} else {
+	    check_v = 1;
+	}
+
+	/*
+	 * Check for hitting the end hemispheres.
+	 */
+    check_hemispheres:
+	if (check_v) {
+	    vect_t ov;		/* ray origin to center (V - P) */
+	    fastf_t rad_sq;
+	    fastf_t magsq_ov;	/* length squared of ov */
+	    fastf_t b;
+	    fastf_t root;	/* root of radical */
+
+	    /*
+	     * First, consider a hit on V hemisphere.
+	     */
+	    VSUB2(ov, part->part_int.part_V, rp[i]->r_pt);
+	    b = VDOT(rp[i]->r_dir, ov);
+	    magsq_ov = MAGSQ(ov);
+	    if (magsq_ov >= (rad_sq = part->part_int.part_vrad *
+			     part->part_int.part_vrad)) {
+		/* ray origin is outside of sphere */
+		if (b < 0) {
+		    /* ray direction is away from sphere */
+		    goto do_check_h;
+		}
+		root = b*b - magsq_ov + rad_sq;
+		if (root <= 0) {
+		    /* no real roots */
+		    goto do_check_h;
+		}
+	    } else {
+		root = b*b - magsq_ov + rad_sq;
+	    }
+	    root = sqrt(root);
+	    t1 = b - root;
+	    /* see if hit'[Z] is below V end of cylinder */
+	    if (pprime[Z] + t1 * dprime[Z] <= part->part_v_hdist) {
+		hitp->hit_magic = RT_HIT_MAGIC;
+		hitp->hit_dist = t1;
+		hitp->hit_surfno = RT_PARTICLE_SURF_VSPHERE;
+		hitp++;
+	    }
+	    t2 = b + root;
+	    if (pprime[Z] + t2 * dprime[Z] <= part->part_v_hdist) {
+		hitp->hit_magic = RT_HIT_MAGIC;
+		hitp->hit_dist = t2;
+		hitp->hit_surfno = RT_PARTICLE_SURF_VSPHERE;
+		hitp++;
+	    }
+	}
+
+    do_check_h:
+	if (check_h) {
+	    vect_t ov;		/* ray origin to center (V - P) */
+	    fastf_t rad_sq;
+	    fastf_t magsq_ov;	/* length squared of ov */
+	    fastf_t b;		/* second term of quadratic eqn */
+	    fastf_t root;	/* root of radical */
+
+	    /*
+	     * Next, consider a hit on H hemisphere
+	     */
+	    VADD2(ov, part->part_int.part_V, part->part_int.part_H);
+	    VSUB2(ov, ov, rp[i]->r_pt);
+	    b = VDOT(rp[i]->r_dir, ov);
+	    magsq_ov = MAGSQ(ov);
+	    if (magsq_ov >= (rad_sq = part->part_int.part_hrad *
+			     part->part_int.part_hrad)) {
+		/* ray origin is outside of sphere */
+		if (b < 0) {
+		    /* ray direction is away from sphere */
+		    goto out;
+		}
+		root = b*b - magsq_ov + rad_sq;
+		if (root <= 0) {
+		    /* no real roots */
+		    goto out;
+		}
+	    } else {
+		root = b*b - magsq_ov + rad_sq;
+	    }
+	    root = sqrt(root);
+	    t1 = b - root;
+	    /* see if hit'[Z] is above H end of cylinder */
+	    if (pprime[Z] + t1 * dprime[Z] >= part->part_h_hdist) {
+		hitp->hit_magic = RT_HIT_MAGIC;
+		hitp->hit_dist = t1;
+		hitp->hit_surfno = RT_PARTICLE_SURF_HSPHERE;
+		hitp++;
+	    }
+	    t2 = b + root;
+	    if (pprime[Z] + t2 * dprime[Z] >= part->part_h_hdist) {
+		hitp->hit_magic = RT_HIT_MAGIC;
+		hitp->hit_dist = t2;
+		hitp->hit_surfno = RT_PARTICLE_SURF_HSPHERE;
+		hitp++;
+	    }
+	}
+    out:
+	if (hitp == &hits[0])
+	    continue;	/* MISS */
+	if (hitp == &hits[1]) {
+	    /* Only one hit, make it a 0-thickness segment */
+	    hits[1] = hits[0];		/* struct copy */
+	    hitp++;
+	} else if (hitp > &hits[2]) {
+	    /*
+	     * More than two intersections found.
+	     * This can happen when a ray grazes down along a tangent
+	     * line; the intersection interval from the hemisphere
+	     * may not quite join up with the interval from the cone.
+	     * Since particles are convex, all we need to do is to
+	     * return the maximum extent of the ray.
+	     * Do this by sorting the intersections,
+	     * and using the minimum and maximum values.
+	     */
+	    primitive_hitsort(hits, hitp - &hits[0]);
+
+	    /* [0] is minimum, make [1] be maximum (hitp is +1 off end) */
+	    hits[1] = hitp[-1];	/* struct copy */
+	}
+
+	segp[i].seg_stp = stp[i];
+	if (hits[0].hit_dist < hits[1].hit_dist) {
+	    /* entry is [0], exit is [1] */
+	    segp[i].seg_in = hits[0];		/* struct copy */
+	    segp[i].seg_out = hits[1];		/* struct copy */
+	} else {
+	    /* entry is [1], exit is [0] */
+	    segp[i].seg_in = hits[1];		/* struct copy */
+	    segp[i].seg_out = hits[0];		/* struct copy */
+	}
+    }
+}
+
+
+/**
  * Given ONE ray distance, return the normal and entry/exit point.
  */
-void
+C_DECL void
 rt_part_norm(register struct hit *hitp, struct soltab *stp, register struct xray *rp)
 {
     register struct part_specific *part =
@@ -832,7 +1143,7 @@ rt_part_norm(register struct hit *hitp, struct soltab *stp, register struct xray
  * Return the curvature of the particle.
  * There are two cases:  hitting a hemisphere, and hitting the cylinder.
  */
-void
+C_DECL void
 rt_part_curve(register struct curvature *cvp, register struct hit *hitp, struct soltab *stp)
 {
     register struct part_specific *part =
@@ -878,7 +1189,7 @@ rt_part_curve(register struct curvature *cvp, register struct hit *hitp, struct 
  *
  * hit_point has already been computed.
  */
-void
+C_DECL void
 rt_part_uv(struct application *ap, struct soltab *stp, register struct hit *hitp, register struct uvcoord *uvp)
 {
     register const struct part_specific *part =
@@ -917,7 +1228,7 @@ rt_part_uv(struct application *ap, struct soltab *stp, register struct hit *hitp
 }
 
 
-void
+C_DECL void
 rt_part_free(register struct soltab *stp)
 {
     register struct part_specific *part =
@@ -964,7 +1275,7 @@ rt_part_hemisphere(register point_t (*ov), register fastf_t *v, fastf_t *a, fast
 }
 
 
-int
+C_DECL int
 rt_part_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_tess_tol *UNUSED(ttol), const struct bn_tol *UNUSED(tol), const struct bview *UNUSED(info))
 {
     struct rt_part_internal *pip;
@@ -1099,7 +1410,7 @@ struct part_vert_strip {
  * middle cylinder	nsegs..nsegs+1
  * lower hemisphere	nsegs+1..nstrips-1	V	South
  */
-int
+C_DECL int
 rt_part_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, const struct bg_tess_tol *ttol, const struct bn_tol *tol)
 {
     struct rt_part_internal *pip;
@@ -1477,7 +1788,7 @@ rt_part_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, c
 }
 
 
-int
+C_DECL int
 rt_part_import4(struct rt_db_internal *ip, const struct bu_external *ep, register const fastf_t *mat, const struct db_i *dbip)
 {
     fastf_t maxrad, minrad;
@@ -1566,7 +1877,7 @@ rt_part_import4(struct rt_db_internal *ip, const struct bu_external *ep, registe
 }
 
 
-int
+C_DECL int
 rt_part_export4(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_part_internal *pip;
@@ -1606,7 +1917,7 @@ rt_part_export4(struct bu_external *ep, const struct rt_db_internal *ip, double 
     return 0;
 }
 
-int
+C_DECL int
 rt_part_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !ip || !mat)
@@ -1667,7 +1978,7 @@ rt_part_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_inte
 
 }
 
-int
+C_DECL int
 rt_part_import5(struct rt_db_internal *ip, const struct bu_external *ep, register const fastf_t *mat, const struct db_i *dbip)
 {
     fastf_t maxrad;
@@ -1732,7 +2043,7 @@ rt_part_import5(struct rt_db_internal *ip, const struct bu_external *ep, registe
 }
 
 
-int
+C_DECL int
 rt_part_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_part_internal *pip;
@@ -1771,7 +2082,7 @@ rt_part_export5(struct bu_external *ep, const struct rt_db_internal *ip, double 
  * First line describes type of solid.
  * Additional lines are indented one tab, and give parameter values.
  */
-int
+C_DECL int
 rt_part_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local)
 {
     register struct rt_part_internal *pip =
@@ -1845,7 +2156,7 @@ rt_part_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbos
 /**
  * Free the storage associated with the rt_db_internal version of this solid.
  */
-void
+C_DECL void
 rt_part_ifree(struct rt_db_internal *ip)
 {
     RT_CK_DB_INTERNAL(ip);
@@ -1855,7 +2166,32 @@ rt_part_ifree(struct rt_db_internal *ip)
 }
 
 
-int
+C_DECL int
+rt_part_make(const struct rt_functab *ftp, struct rt_db_internal *intern, const char* UNUSED(variant), const point_t origin, double scale)
+{
+    struct rt_part_internal *part_ip;
+
+    intern->idb_major_type = DB5_MAJORTYPE_BRLCAD;
+    intern->idb_type = ID_PARTICLE;
+    BU_ASSERT(&OBJ[intern->idb_type] == ftp);
+    intern->idb_meth = ftp;
+
+    BU_ALLOC(part_ip, struct rt_part_internal);
+    intern->idb_ptr = (void *)part_ip;
+    part_ip->part_magic = RT_PART_INTERNAL_MAGIC;
+
+    VSET(part_ip->part_V, origin[X], origin[Y], origin[Z] - scale*0.25);
+    VSET(part_ip->part_H, 0.0, 0.0, 0.5*scale);
+    part_ip->part_vrad = scale*0.25;
+    part_ip->part_hrad = scale*0.125;
+    /* TODO: type variants */
+    part_ip->part_type = RT_PARTICLE_TYPE_CONE;
+
+    return BRLCAD_OK;
+}
+
+
+C_DECL int
 rt_part_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
 {
     if (ip) RT_CK_DB_INTERNAL(ip);
@@ -1864,7 +2200,7 @@ rt_part_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_part_volume(fastf_t *vol, const struct rt_db_internal *ip)
 {
     fastf_t vrad, hrad, mag_h;
@@ -1887,7 +2223,7 @@ rt_part_volume(fastf_t *vol, const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_part_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 {
     fastf_t vrad, hrad, mag_h;
@@ -1908,7 +2244,7 @@ rt_part_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_part_centroid(point_t *cent, const struct rt_db_internal *ip)
 {
     fastf_t vrad, hrad, mag_h, nm, dm, c_frst, cv_hem, ch_hem;
@@ -1945,7 +2281,7 @@ rt_part_centroid(point_t *cent, const struct rt_db_internal *ip)
     VADD3(*cent, fcent, hhcent, cvcent);
 }
 
-int
+C_DECL int
 rt_part_labels(struct rt_point_labels *pl, int pl_max, const mat_t xform, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     int lcnt = 4;
@@ -1988,7 +2324,7 @@ rt_part_labels(struct rt_point_labels *pl, int pl_max, const mat_t xform, const 
     return lcnt;
 }
 
-const char *
+C_DECL const char *
 rt_part_keypoint(point_t *pt, const char *keystr, const mat_t mat, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     if (!pt || !ip)
@@ -2022,7 +2358,7 @@ part_kpt_end:
 }
 
 
-int
+C_DECL int
 rt_part_perturb(struct rt_db_internal **oip, const struct rt_db_internal *ip, int planar_only, fastf_t val)
 {
     if (NEAR_ZERO(val, SMALL_FASTF))

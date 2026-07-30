@@ -36,9 +36,6 @@
 #include "./ext.h"
 
 
-extern	int	width;			/* # of pixels in X; picture width */
-extern int	npsw;			/* number of worker PSWs to run */
-
 /* Viewing module specific "set" variables */
 struct bu_structparse view_parse[] = {
     {"",	0, (char *)0,	0,	BU_STRUCTPARSE_FUNC_NULL }
@@ -215,7 +212,7 @@ view_end(struct application *ap)
 }
 
 
-void application_init (void) {}
+C_DECL void application_init (void) {}
 
 /*
  * Local Variables:

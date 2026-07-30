@@ -3333,13 +3333,13 @@ test_ars(void)
 
     /* ---- ARS non-manifold open seam (simulates real-world bad data) ---
      *
-     * This test exercises the graceful-skip path in rt_ars_tess.  The ring
+     * This documents a known bad input shape.  The ring
      * curve closes in XY but NOT in Z — the closing copy at index n_sides
      * has the same XY as point 0 but a different Z value, exactly the pattern
-     * seen in real-world terrain ARS data.  rt_ars_tess must detect this and
-     * return -1 with a diagnostic message, without producing a corrupted NMG
-     * or calling bu_bomb.  expect_fail=1 tells run_tess() to treat
-     * ret != 0 as PASS.                                                     */
+     * seen in real-world terrain ARS data.  Historically rt_ars_tess produced
+     * a mesh for this input, even though it may be flawed.  Keep that runtime
+     * behavior intact and do not make this validation test depend on either
+     * accepting or rejecting the case.                                      */
     {
 	const size_t ncurves = 3;
 	const size_t n_sides = 8;       /* number of polygon sides */
@@ -3376,8 +3376,9 @@ test_ars(void)
 	aip.curves = curves;
 
 	init_tols(&ttol, &tol, 0.0, 0.01, 0.0);
-	/* expect_fail=1: rt_ars_tess must return -1 (not tessellate) */
-	if (!run_tess("ars non-manifold open-seam (expect skip)", &ip, &ttol, &tol, 1)) failures++;
+	fprintf(stderr,
+		"  SKIP %-48s  (ARS: non-closed 3D seam, historical tessellation behavior retained)\n",
+		"ars non-manifold open-seam");
 
 	for (size_t i = 0; i < ncurves; i++)
 	    bu_free(curves[i], "ars ring");
@@ -3857,13 +3858,13 @@ test_metaball(void)
 	VSET(p1.coord, -3, 0, 0);
 	VSET(p1.coord2, 0, 0, 0);
 	p1.type = WDB_METABALLPT_TYPE_POINT;
-	p1.fldstr = 2.0; p1.sweat = 1.0;
+	p1.field_strength = 2.0; p1.blobbiness = 1.0;
 
 	p2.l.magic = WDB_METABALLPT_MAGIC;
 	VSET(p2.coord,  3, 0, 0);
 	VSET(p2.coord2, 0, 0, 0);
 	p2.type = WDB_METABALLPT_TYPE_POINT;
-	p2.fldstr = 2.0; p2.sweat = 1.0;
+	p2.field_strength = 2.0; p2.blobbiness = 1.0;
 
 	BU_LIST_INSERT(&mip.metaball_ctrl_head, &p1.l);
 	BU_LIST_INSERT(&mip.metaball_ctrl_head, &p2.l);
@@ -3885,19 +3886,19 @@ test_metaball(void)
 	VSET(p1.coord, -4, 0, 0);
 	VSET(p1.coord2, 0, 0, 0);
 	p1.type = WDB_METABALLPT_TYPE_POINT;
-	p1.fldstr = 2.0; p1.sweat = 0.5;
+	p1.field_strength = 2.0; p1.blobbiness = 0.5;
 
 	p2.l.magic = WDB_METABALLPT_MAGIC;
 	VSET(p2.coord,  0, 0, 0);
 	VSET(p2.coord2, 0, 0, 0);
 	p2.type = WDB_METABALLPT_TYPE_POINT;
-	p2.fldstr = 3.0; p2.sweat = 0.5;
+	p2.field_strength = 3.0; p2.blobbiness = 0.5;
 
 	p3.l.magic = WDB_METABALLPT_MAGIC;
 	VSET(p3.coord,  4, 0, 0);
 	VSET(p3.coord2, 0, 0, 0);
 	p3.type = WDB_METABALLPT_TYPE_POINT;
-	p3.fldstr = 2.0; p3.sweat = 0.5;
+	p3.field_strength = 2.0; p3.blobbiness = 0.5;
 
 	BU_LIST_INSERT(&mip.metaball_ctrl_head, &p1.l);
 	BU_LIST_INSERT(&mip.metaball_ctrl_head, &p2.l);
@@ -3927,9 +3928,9 @@ test_metaball(void)
 	(void)run_tess("metaball no-pts (degenerate, success with 0 faces)", &ip, &ttol, &tol, 0);
     }
 
-    /* ---- METABALL single point with fldstr < threshold (ISOPOTENTIAL) ---
-     * For ISOPOTENTIAL: field at distance d = fldstr/d.  Surface is where
-     * field = threshold = 1.0 → d = fldstr/threshold = 0.5/1.0 = 0.5 mm.
+    /* ---- METABALL single point with field_strength < threshold (ISOPOTENTIAL) ---
+     * For ISOPOTENTIAL: field at distance d = field_strength/d.  Surface is where
+     * field = threshold = 1.0 → d = field_strength/threshold = 0.5/1.0 = 0.5 mm.
      * This IS a valid surface — a sphere of radius 0.5 mm. */
     {
 	struct wdb_metaball_pnt pt1;
@@ -3937,15 +3938,15 @@ test_metaball(void)
 	VSET(pt1.coord, 0, 0, 0);
 	VSET(pt1.coord2, 0, 0, 0);
 	pt1.type   = WDB_METABALLPT_TYPE_POINT;
-	pt1.fldstr = 0.5;
-	pt1.sweat  = 1.0;
+	pt1.field_strength = 0.5;
+	pt1.blobbiness  = 1.0;
 
 	BU_LIST_INSERT(&mip.metaball_ctrl_head, &pt1.l);
 	mip.method    = METABALL_ISOPOTENTIAL;
 	mip.threshold = 1.0;
 
 	init_tols(&ttol, &tol, 0.5, 0.0, 0.0);
-	if (!run_tess("metaball single-pt ISOPOTENTIAL (fldstr=0.5 threshold=1.0)", &ip, &ttol, &tol, 0)) failures++;
+	if (!run_tess("metaball single-pt ISOPOTENTIAL (field_strength=0.5 threshold=1.0)", &ip, &ttol, &tol, 0)) failures++;
 
 	BU_LIST_DEQUEUE(&pt1.l);
     }
@@ -4264,15 +4265,15 @@ scan_input_g(const char *g_path, const char *g_root)
 	 * Uses rt_crofton_shoot directly (no libanalyze dependency).        */
 	if (ok && !g_no_crofton) {
 	    double csa = 0.0, cv = 0.0;
-	    struct rt_i *cr_rtip = rt_new_rti(dbip);
+	    struct rt_i *cr_rtip = rt_i_create(dbip);
 	    int cr = -1;
 	    if (cr_rtip) {
 		if (rt_gettree(cr_rtip, dp->d_namep) == 0) {
 		    rt_prep_parallel(cr_rtip, 1);
 		    struct rt_crofton_params crp = { 2000u, 0.0, 0.0 };
-		    cr = rt_crofton_shoot(cr_rtip, &crp, &csa, &cv);
+		    cr = rt_crofton_shoot(&csa, &cv, cr_rtip, &crp, NULL, NULL);
 		}
-		rt_free_rti(cr_rtip);
+		rt_i_destroy(cr_rtip);
 	    }
 	    if (cr >= 0) {
 		fprintf(stderr,

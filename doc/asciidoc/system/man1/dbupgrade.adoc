@@ -4,36 +4,89 @@
 :manmanual: BRL-CAD
 
 == NAME
-dbupgrade - a program to upgrade BRL-CAD mged geometry databases files to the current version.
+dbupgrade - upgrade a BRL-CAD geometry database to the current version
 
 == SYNOPSIS
 
 [source]
 ----
-dbupgrade input.g output.g
+dbupgrade [-f] [-r] [-h] [-?] input.g output.g
 ----
 
 
 [[description]]
 == DESCRIPTION
 
-*dbupgrade* operates on the indicated input geometry database _input.g_, recognizing the version of the BRL-CAD database provided as input and then converting it to the current database version. Output is then saved to the specified _output.g_ file.
+*dbupgrade* reads an older BRL-CAD geometry database (_input.g_), upgrades it to
+the current database version (v5), and writes the result to a new file
+(_output.g_).  The input is opened read-only and is never modified.  The output
+file must not already exist.
 
-Note that this tool will attempt to automatically 'fix' an existing (v4 format) binary database that was transferred from a binary-incompatible platform. However, this process may be imperfect - the best approach (if the original platform on which the file was created is available) is to run *dbupgrade* on the file before transferring from the originating platform. Once upgraded the output file will be platform-independent regardless of the platform on which the upgrade was done.
+The v5 database format is platform-independent, so upgrading eliminates the
+need to use *g2asc*(1) and *asc2g*(1) to transfer databases between different
+computer architectures.
 
-Running *dbupgrade* removes the need to run *g2asc*(1) and *asc2g*(1) on a database to move it between computers (historically this was a way to work around the platform-specific nature of v4 files). The latest BRL-CAD geometry database format is platform-independent.
+In addition to changing the on-disk format, *dbupgrade* converts obsolete
+geometry types and properties.  Heightfields (HF) are converted to displacement
+maps (DSP), polysolids (POLY) to bag-of-triangles (BOT), and NURB B-splines
+(BSPLINE) to boundary representations (BREP).  Old "plastic" shader names are
+rewritten as "phong", and any v4 material color table is migrated into the
+`regionid_colortable` global attribute.  Objects that fail to convert are
+reported on standard error and the remaining objects are still written.
 
+[[options]]
+== OPTIONS
+
+*-f*::
+  Force the operation.  Normally *dbupgrade* halts with a warning if the input
+  is already at the current version (an upgrade) or is not v5 (a revert).  This
+  option forces the conversion to proceed anyway (e.g. v5 to v5, applying only
+  the geometry-type updates).
+
+*-r*::
+  Revert the database to the older v4 format instead of upgrading.  The input
+  must be a v5 database (unless combined with *-f*).  Objects that have no v4
+  equivalent are skipped and reported.
+
+*-h*, *-?*::
+  Print a usage message and exit.
+
+[[examples]]
+== EXAMPLES
+
+.Upgrade an old database to the current format
+====
+[source,bash]
+----
+dbupgrade legacy_v4.g model.g
+----
+Reads the v4 database `legacy_v4.g` and writes a current v5 database `model.g`,
+converting any heightfields, polysolids, and B-splines along the way.
+====
+
+.Refresh a current database in place of obsolete geometry
+====
+[source,bash]
+----
+dbupgrade -f model.g model_updated.g && mged model_updated.g
+----
+Forces *dbupgrade* to rewrite the already-v5 `model.g`, applying the internal
+geometry-type conversions (for example, polysolids to BOTs) even though the
+format version does not change, then opens the result in *mged*(1).
+====
 
 [[see_also]]
 == SEE ALSO
 
-*mged*(1), *g2asc*(1), *asc2g*(1)
+*brlcad*(1), *mged*(1), *g2asc*(1), *asc2g*(1)
 
 
 [[diagnostics]]
 == DIAGNOSTICS
 
-Numerous error conditions are possible, usually due to errors in the geometry database. Descriptive messages are printed on standard error (file descriptor 2).
+Numerous error conditions are possible, usually due to errors in the geometry
+database.  Descriptive messages are printed on standard error (file descriptor
+2), and a count of objects that failed to convert is reported when finished.
 
 
 [[author]]
@@ -45,7 +98,7 @@ BRL-CAD Team
 [[copyright]]
 == COPYRIGHT
 
-This software is Copyright (c) 2006-2026 by the United States Government as represented by U.S. Army Research Laboratory.
+This software is Copyright (c) 1989-2026 by the United States Government as represented by U.S. Army Research Laboratory.
 
 
 [[bug_reports]]

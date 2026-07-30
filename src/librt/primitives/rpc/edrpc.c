@@ -23,6 +23,8 @@
 
 #include "common.h"
 
+#include "bu/opt.h"
+
 #include <math.h>
 #include <string.h>
 
@@ -38,7 +40,7 @@
 #define ECMD_RPC_H		17044
 #define ECMD_RPC_R		17045
 
-void
+C_DECL void
 rt_edit_rpc_set_edit_mode(struct rt_edit *s, int mode)
 {
     rt_edit_set_edflag(s, mode);
@@ -75,7 +77,7 @@ struct rt_edit_menu_item rpc_menu[] = {
     { "", NULL, 0 }
 };
 
-struct rt_edit_menu_item *
+C_DECL struct rt_edit_menu_item *
 rt_edit_rpc_menu_item(const struct bn_tol *UNUSED(tol))
 {
     return rpc_menu;
@@ -134,7 +136,8 @@ static const struct rt_edit_cmd_desc rpc_cmds[] = {
 	1,                    /* nparam       */
 	rpc_b_params,         /* params       */
 	1,                    /* interactive  */
-	10                    /* display_order */
+	10                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_RPC_H,           /* cmd_id       */
@@ -143,7 +146,8 @@ static const struct rt_edit_cmd_desc rpc_cmds[] = {
 	1,                    /* nparam       */
 	rpc_h_params,         /* params       */
 	1,                    /* interactive  */
-	20                    /* display_order */
+	20                    /* display_order */,
+	NULL                  /* req_types */
     },
     {
 	ECMD_RPC_R,           /* cmd_id       */
@@ -152,7 +156,8 @@ static const struct rt_edit_cmd_desc rpc_cmds[] = {
 	1,                    /* nparam       */
 	rpc_r_params,         /* params       */
 	1,                    /* interactive  */
-	30                    /* display_order */
+	30                    /* display_order */,
+	NULL                  /* req_types */
     }
 };
 
@@ -160,10 +165,12 @@ static const struct rt_edit_prim_desc rpc_prim_desc = {
     "rpc",                /* prim_type    */
     "Right Parabolic Cylinder", /* prim_label */
     3,                    /* ncmd         */
-    rpc_cmds              /* cmds         */
+    rpc_cmds              /* cmds         */,
+    0,                    /* nopt         */
+    NULL                  /* opts         */
 };
 
-const struct rt_edit_prim_desc *
+C_DECL const struct rt_edit_prim_desc *
 rt_edit_rpc_edit_desc(void)
 {
     return &rpc_prim_desc;
@@ -171,7 +178,7 @@ rt_edit_rpc_edit_desc(void)
 
 #define V3BASE2LOCAL(_pt) (_pt)[X]*base2local, (_pt)[Y]*base2local, (_pt)[Z]*base2local
 
-void
+C_DECL void
 rt_edit_rpc_write_params(
 	struct bu_vls *p,
        	const struct rt_db_internal *ip,
@@ -198,7 +205,7 @@ rt_edit_rpc_write_params(
     if (ln) *ln = '\0'; \
     while (lc && strchr(lc, ':')) lc++
 
-int
+C_DECL int
 rt_edit_rpc_read_params(
 	struct rt_db_internal *ip,
 	const char *fc,
@@ -350,7 +357,7 @@ rt_edit_rpc_pscale(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_rpc_edit(struct rt_edit *s)
 {
     switch (s->edit_flag) {
@@ -363,7 +370,7 @@ rt_edit_rpc_edit(struct rt_edit *s)
     }
 }
 
-int
+C_DECL int
 rt_edit_rpc_edit_xy(
         struct rt_edit *s,
         const vect_t mousevec
@@ -387,6 +394,71 @@ rt_edit_rpc_edit_xy(
     }
 }
 
+
+int
+rt_edit_rpc_repair(struct bu_vls *log_str, struct rt_db_internal *ip, const struct bn_tol *tol, int argc, const char **argv)
+{
+    struct rt_rpc_internal *rpc;
+    fastf_t mag_b, mag_h;
+    int repaired = 0;
+    int options_json = 0;
+    int print_help = 0;
+
+    struct bu_opt_desc d[3];
+    BU_OPT(d[0], "h", "help", "", NULL, &print_help, "Print help");
+    BU_OPT(d[1], "", "options-json", "", NULL, &options_json, "Return JSON of supported options");
+    BU_OPT_NULL(d[2]);
+
+    if (argc > 0 && argv) {
+        bu_opt_parse(NULL, argc, argv, d);
+    }
+
+    if (options_json) {
+        if (log_str) {
+            bu_vls_printf(log_str, "{\"options\":[]}");
+        }
+        return 1;
+    }
+
+    if (print_help) {
+        if (log_str) {
+            char *option_help = bu_opt_describe(d, NULL);
+            bu_vls_printf(log_str, "{\"status\":\"help\",\"message\":\"Options:\\n%s\"}", option_help ? option_help : "");
+            if (option_help) bu_free(option_help, "help str");
+        }
+        return -1;
+    }
+
+    RT_CK_DB_INTERNAL(ip);
+    rpc = (struct rt_rpc_internal *)ip->idb_ptr;
+    RT_RPC_CK_MAGIC(rpc);
+
+    if (!tol) {
+        static const struct bn_tol default_tol = BN_TOL_INIT_TOL;
+        tol = &default_tol;
+    }
+
+    mag_b = MAGNITUDE(rpc->rpc_B);
+    mag_h = MAGNITUDE(rpc->rpc_H);
+
+    if (mag_b > SQRT_SMALL_FASTF && mag_h > SQRT_SMALL_FASTF) {
+        fastf_t f = VDOT(rpc->rpc_B, rpc->rpc_H) / (mag_b * mag_h);
+        if (!NEAR_ZERO(f, tol->perp)) {
+            vect_t proj;
+            VSCALE(proj, rpc->rpc_H, VDOT(rpc->rpc_B, rpc->rpc_H) / MAGSQ(rpc->rpc_H));
+            VSUB2(rpc->rpc_B, rpc->rpc_B, proj);
+            /* Restore length */
+            VSCALE(rpc->rpc_B, rpc->rpc_B, mag_b / MAGNITUDE(rpc->rpc_B));
+            repaired++;
+        }
+    }
+
+    if (repaired > 0 && log_str) {
+        bu_vls_printf(log_str, "{\"status\":\"success\",\"message\":\"Successfully repaired RPC\"}");
+    }
+
+    return repaired > 0 ? 0 : -1;
+}
 
 /*
  * Local Variables:

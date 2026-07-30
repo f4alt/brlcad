@@ -96,6 +96,7 @@ rt_edit_create(struct db_full_path *dfp, struct db_i *dbip, struct bn_tol *tol, 
     RT_DB_INTERNAL_INIT(&s->es_int);
 
     bu_ptbl_init(&s->comb_insts, 8, "comb inst tbl");
+    bu_avs_init_empty(&s->options);
 
     MAT_IDN(s->acc_rot_sol);
     MAT_IDN(s->e_invmat);
@@ -195,12 +196,15 @@ rt_edit_destroy(struct rt_edit *s)
 
     struct rt_db_internal *ip = &s->es_int;
 
-    if (s->ipe_ptr && EDOBJ[ip->idb_type].ft_prim_edit_destroy) {
-	 (*EDOBJ[ip->idb_type].ft_prim_edit_destroy)(s->ipe_ptr);
-	 s->ipe_ptr = NULL;
+    if (s->ipe_ptr) {
+	if (ip->idb_type > 0 && EDOBJ[ip->idb_type].magic == RT_FUNCTAB_MAGIC &&
+		EDOBJ[ip->idb_type].ft_prim_edit_destroy)
+	    (*EDOBJ[ip->idb_type].ft_prim_edit_destroy)(s->ipe_ptr);
+	s->ipe_ptr = NULL;
     }
 
     bu_ptbl_free(&s->comb_insts);
+    bu_avs_free(&s->options);
 
     rt_db_free_internal(&s->es_int);
     bu_free_external(&s->es_ckpt);
@@ -237,6 +241,8 @@ rt_edit_reset(struct rt_edit *s)
     bu_free_external(&s->es_ckpt);
     BU_EXTERNAL_INIT(&s->es_ckpt);
     bu_ptbl_reset(&s->comb_insts);
+    bu_avs_free(&s->options);
+    bu_avs_init_empty(&s->options);
 
     /* Clear the edit-callback map (will be repopulated by
      * mged_edit_clbk_sync() at the next init_sedit call) */
@@ -1260,6 +1266,21 @@ edit_param_type_str(int type)
     }
 }
 
+static std::string
+edit_cmd_slug(const char *label)
+{
+    std::string slug;
+    for (const char *p = label; p && *p; p++) {
+	if (isalnum((unsigned char)*p))
+	    slug += (char)tolower((unsigned char)*p);
+	else if (!slug.empty() && slug.back() != '_')
+	    slug += '_';
+    }
+    while (!slug.empty() && slug.back() == '_')
+	slug.pop_back();
+    return slug;
+}
+
 /* Emit a fastf_t value as JSON number or "null" for NO_LIMIT */
 static void
 emit_limit(struct bu_vls *out, fastf_t val)
@@ -1316,6 +1337,21 @@ rt_edit_prim_desc_to_json(struct bu_vls *out,
 	const struct rt_edit_cmd_desc *cmd = &desc->cmds[ci];
 	bu_vls_strcat(out, "    {\n");
 	bu_vls_printf(out, "      \"cmd_id\": %d,\n", cmd->cmd_id);
+	std::string cname = edit_cmd_slug(cmd->label);
+	bu_vls_strcat(out, "      \"canonical_name\": ");
+	emit_json_str(out, cname.c_str());
+	bu_vls_strcat(out, ",\n");
+	bu_vls_strcat(out, "      \"aliases\": [");
+	bool first_alias = true;
+	if (cmd->nparam == 1 && cmd->params && cmd->params[0].name) {
+	    const char *a = cmd->params[0].name;
+	    if (a && !BU_STR_EQUAL(a, cname.c_str())) {
+		emit_json_str(out, a);
+		first_alias = false;
+	    }
+	}
+	(void)first_alias;
+	bu_vls_strcat(out, "],\n");
 	bu_vls_strcat(out, "      \"label\": ");
 	emit_json_str(out, cmd->label);
 	bu_vls_strcat(out, ",\n");
@@ -1423,8 +1459,21 @@ rt_edit_type_to_json(struct bu_vls *out, int prim_type_id)
     return BRLCAD_ERROR;
 }
 
+int
+rt_edit_set_opt(struct rt_edit *s, const char *key, const char *val)
+{
+    if (!s || !key || !val) return BRLCAD_ERROR;
+    return bu_avs_add(&s->options, key, val);
+}
 
+const char *
+rt_edit_get_opt(struct rt_edit *s, const char *key)
+{
+    if (!s || !key) return NULL;
+    return bu_avs_get(&s->options, key);
+}
 
+// Local Variables:
 // tab-width: 8
 // mode: C++
 // c-basic-offset: 4

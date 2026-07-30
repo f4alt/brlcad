@@ -528,7 +528,7 @@ wdb_move_arb_edge_cmd(struct rt_wdb *wdbp,
 	return TCL_ERROR;
     }
 
-    if (rt_arb_edit(&error_msg, arb, arb_type, edge, pt, planes, &wdbp->wdb_tol)) {
+    if (rt_arb_edit(&error_msg, arb, NULL, arb_type, edge, RT_ARB_EDIT_DEFAULT, pt, planes, &wdbp->wdb_tol)) {
 	Tcl_AppendResult((Tcl_Interp *)wdbp->wdb_interp, bu_vls_addr(&error_msg), (char *)0);
 	rt_db_free_internal(&intern);
 	bu_vls_free(&error_msg);
@@ -1301,7 +1301,7 @@ wdb_deleteProc_rt(void *clientData)
     rtip = ap->a_rt_i;
     RT_CK_RTI(rtip);
 
-    rt_free_rti(rtip);
+    rt_i_destroy(rtip);
     ap->a_rt_i = (struct rt_i *)NULL;
 
     bu_free((void *)ap, "struct application");
@@ -1330,7 +1330,7 @@ wdb_rt_gettrees_cmd(struct rt_wdb *wdbp,
 	return TCL_ERROR;
     }
 
-    rtip = rt_new_rti(wdbp->dbip);
+    rtip = rt_i_create(wdbp->dbip);
     newprocname = argv[1];
 
     /* Delete previous proc (if any) to release all that memory, first */
@@ -1361,7 +1361,7 @@ wdb_rt_gettrees_cmd(struct rt_wdb *wdbp,
     if (rt_gettrees(rtip, argc-2, (const char **)&argv[2], 1) < 0) {
 	Tcl_AppendResult((Tcl_Interp *)wdbp->wdb_interp,
 			 "rt_gettrees() returned error", (char *)NULL);
-	rt_free_rti(rtip);
+	rt_i_destroy(rtip);
 	return TCL_ERROR;
     }
 
@@ -1907,6 +1907,23 @@ static struct bu_cmdtab wdb_cmds[] = {
     {"version",          wdb_version_tcl},
     {(const char *)NULL, BU_CMD_NULL}
 };
+
+
+int
+mged_wdb_db_cmd(struct rt_wdb *wdbp, int argc, const char **argv)
+{
+    if (!wdbp || argc < 2 || !argv)
+	return BRLCAD_ERROR | GED_UNKNOWN;
+
+    if (BU_STR_EQUAL(argv[1], "make_bb"))
+	return wdb_make_bb_cmd(wdbp, argc - 1, argv + 1);
+    if (BU_STR_EQUAL(argv[1], "observer"))
+	return wdb_observer_cmd(wdbp, argc - 1, argv + 1);
+    if (BU_STR_EQUAL(argv[1], "rt_gettrees"))
+	return wdb_rt_gettrees_cmd(wdbp, argc - 1, argv + 1);
+
+    return BRLCAD_ERROR | GED_UNKNOWN;
+}
 
 
 /* used to suppress bu_log() output */

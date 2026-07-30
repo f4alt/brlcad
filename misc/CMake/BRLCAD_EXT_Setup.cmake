@@ -31,6 +31,38 @@
 
 include(CMakeParseArguments)
 
+# Try to locate a usable git executable. On Windows, Visual Studio may
+# provide git in non-standard locations; try common Program Files and
+# Visual Studio paths as a fallback when find_program() fails.
+function(brlcad_find_git)
+  # brlcad_find_git() sets GIT_EXEC in parent scope; make local copy
+  if(NOT DEFINED GIT_EXEC)
+    set(GIT_EXEC "")
+  endif()
+  if(NOT GIT_EXEC AND WIN32)
+    set(_git_candidates)
+    if(DEFINED ENV{ProgramFiles})
+      list(APPEND _git_candidates "$ENV{ProgramFiles}/Git/cmd/git.exe" "$ENV{ProgramFiles}/Git/bin/git.exe")
+    endif()
+    if(DEFINED ENV{VSINSTALLDIR})
+      list(APPEND _git_candidates "$ENV{VSINSTALLDIR}/Common7/IDE/CommonExtensions/Microsoft/TeamFoundation/Team Explorer/Git/cmd/git.exe")
+      list(APPEND _git_candidates "$ENV{VSINSTALLDIR}/Common7/IDE/CommonExtensions/Microsoft/TeamFoundation/Team Explorer/Git/mingw64/bin/git.exe")
+    endif()
+    foreach(_c ${_git_candidates})
+      if(EXISTS "${_c}")
+        set(GIT_EXEC "${_c}" PARENT_SCOPE)
+        return()
+      endif()
+    endforeach()
+  endif()
+  # If find_program found it, propagate to parent scope
+  if(GIT_EXEC)
+    set(GIT_EXEC "${GIT_EXEC}" PARENT_SCOPE)
+  else()
+    set(GIT_EXEC "" PARENT_SCOPE)
+  endif()
+endfunction()
+
 
 # Preliminary setup and variable population
 function(brlcad_bext_init BEXT_SHA1)
@@ -306,11 +338,13 @@ function(setup_bext_dir)
     execute_process(
       COMMAND ${GIT_EXEC} clone https://github.com/BRL-CAD/bext.git
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+      COMMAND_ERROR_IS_FATAL ANY
     )
     message("BRL-CAD bext checkout command: ${GIT_EXEC} -c advice.detachedHead=false checkout ${BEXT_SHA1}")
     execute_process(
       COMMAND ${GIT_EXEC} -c advice.detachedHead=false checkout ${BEXT_SHA1}
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/bext
+      COMMAND_ERROR_IS_FATAL ANY
     )
 
     # Configure process will need to clean up bext
@@ -346,9 +380,12 @@ function(brlcad_ext_setup)
   if(NOT EXISTS ${BRLCAD_EXT_SOURCE_DIR})
     message(FATAL_ERROR "bext directory ${BRLCAD_EXT_SOURCE_DIR} is not present")
   endif(NOT EXISTS ${BRLCAD_EXT_SOURCE_DIR})
-  if(NOT EXISTS "${BRLCAD_EXT_SOURCE_DIR}/dependencies.dot")
+  if(
+    NOT EXISTS "${BRLCAD_EXT_SOURCE_DIR}/CMakeLists.txt"
+    OR NOT EXISTS "${BRLCAD_EXT_SOURCE_DIR}/CMake/BextDependencyInventory.cmake"
+  )
     message(FATAL_ERROR "Invalid bext directory: ${BRLCAD_EXT_SOURCE_DIR}")
-  endif(NOT EXISTS "${BRLCAD_EXT_SOURCE_DIR}/dependencies.dot")
+  endif()
 
   # We do allow the user to specify a build dir to be reused, however
   # this is unpredictable and may cause unexpected results depending
@@ -394,6 +431,11 @@ function(brlcad_ext_setup)
     -DUSE_APPLESEED=${BEXT_USE_APPLESEED} -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
     -DCMAKE_INSTALL_PREFIX=${BRLCAD_EXT_INSTALL_DIR}
     )
+  if(BEXT_ENABLE_ALL)
+    # Some bext projects cache empty ENABLE_<pkg> entries, which prevents
+    # bext's ENABLE_ALL checks from forcing these dependencies on.
+    list(APPEND CMAKE_CMD_ARGS -DENABLE_EIGEN=ON -DENABLE_OPENCV=ON -DENABLE_ZLIB=ON)
+  endif(BEXT_ENABLE_ALL)
 
   # If we're doing a components build, add the component list to the
   # CMake arguments

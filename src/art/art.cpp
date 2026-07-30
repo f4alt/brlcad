@@ -167,7 +167,7 @@
 
 struct resource* resources;
 size_t samples = 25;
-size_t light_intensity = 200.0; // make ambient light match rt
+size_t light_intensity = 200; // make ambient light match rt
 //size_t light_intensity = 30.0;
 const char* global_title_file;
 asf::auto_release_ptr<asr::Project> project_ptr;
@@ -294,7 +294,7 @@ init_defaults(void)
     option("Advanced", "-U #", "Turn on air region rendering (default: 0 - off)", 100);
     option("Advanced", "-V #", "View (pixel) aspect ratio (width/height)", 100);
     option("Advanced", "-j xmin, xmax, ymin, ymax", "Only render pixels within the specified sub-rectangle", 100);
-    option("Advanced", "-k xdir, ydir, zdir, dist", "Specify a cutting plane for the entire render scene", 100);
+    option("Advanced", "-k xdir,ydir,zdir,dist | x,y,z,nx,ny,nz", "Specify a cutting plane for the entire render scene", 100);
 
     option("Developer", "-v [#]", "Specify or increase RT verbosity", 100);
     option("Developer", "-X #", "Specify RT debugging flags", 100);
@@ -700,7 +700,6 @@ build_project(const char* file, const char* UNUSED(objects))
     RT_DBTS_INIT(&state);
     struct db_i* dbip = db_open(file, DB_OPEN_READONLY);
     state.ts_dbip = dbip;
-    state.ts_resp = resources;
 
     if (objc) {
 	db_walk_tree(APP.a_rt_i->rti_dbip, objc, (const char**)objv, 1, &state, register_region, NULL, NULL, reinterpret_cast<void*>(scene.get()));
@@ -830,7 +829,7 @@ build_project(const char* file, const char* UNUSED(objects))
 		));
         camera = pinhole;
     } else {
-        // Create a orthographic camera with film dimensions
+        // Create an orthographic camera with film dimensions
         bu_vls_sprintf(&dimensions, "%f %f", 2.0, 2.0);
         asf::auto_release_ptr<asr::Camera> ortho(
 	    asr::OrthographicCameraFactory().create(
@@ -950,34 +949,34 @@ fb_setup() {
 extern "C" void
 view_setup(struct rt_i* UNUSED(rtip))
 {
-    bu_bomb("In view setup, Dont call me!");
+    bu_bomb("In view setup, Don't call me!");
 }
 
 
 extern "C" void
 view_2init(struct application* UNUSED(ap), char* UNUSED(framename))
 {
-    bu_bomb("In 2init, Dont call me!");
+    bu_bomb("In 2init, Don't call me!");
 }
 
 
 extern "C" void
 view_end(struct application* UNUSED(ap)) {
-    bu_bomb("In end, Dont call me!");
+    bu_bomb("In end, Don't call me!");
 }
 
 
 extern "C" void
 view_cleanup(struct rt_i* UNUSED(rtip))
 {
-    bu_bomb("in cleanup, Dont call me!");
+    bu_bomb("in cleanup, Don't call me!");
 }
 
 
 extern "C" void
 do_run(int UNUSED(a), int UNUSED(b))
 {
-    bu_bomb("in run, Dont call me!");
+    bu_bomb("in run, Don't call me!");
 }
 
 

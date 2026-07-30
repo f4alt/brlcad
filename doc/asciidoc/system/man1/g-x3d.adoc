@@ -1,54 +1,116 @@
 = G-X3D(1)
 :doctype: manpage
 :mansource: BRL-CAD
-:manmanual: User Commands
+:manmanual: BRL-CAD
 
 == NAME
-g-x3d - Perform Boolean evaluations to produce an X3D facetted model
+
+g-x3d - convert BRL-CAD geometry to an X3D faceted model
 
 == SYNOPSIS
 
 [source]
 ----
-g-x3d [-v] [-d calc_dist_tol] [-a abs_tess_tol] [-n norm_tess_tol] [-r rel_tess_tol] [-x librt_debug_flag] [-X NMG_debug_flag] [-u units_name] [-P #_of_CPUs] [-o outfile] infile.g object(s)
+g-x3d [-v] [-d _calc_dist_tol_] [-a _abs_tess_tol_] [-r _rel_tess_tol_] [-n _norm_tess_tol_] [-u _units_] [-P _ncpu_] [-x _librt_debug_] [-X _nmg_debug_] [-o _out.x3d_] _model.g_ _object(s)_
 ----
-
 
 [[description]]
 == DESCRIPTION
 
-*g-x3d* performs the Boolean operations specified in any regions in the specified _object(s)_ and writes the resulting facetted objects to _outfile_ or to _stdout_ if the *-o* option is not used. The output is in X3D facetted format. The *-v* option requests verbose output while the conversion is taking place. The *-d* option specifies a calculational distance tolerance (in millimeters). This tolerance is used to distinguish neighboring vertices. Any two vertices less than this tolerance distance apart will be considered the same vertex. The default value is 0.005mm. Prior to performing the Boolean operations for each region, the involved primitive solids are converted to a planar facetted approximation and stored as NMG solids. This tessellation can be controlled using the tessellation tolerances. The *-a* option may be used to specify an absolute tessellation tolerance (in millimeters). This requires that the maximum absolute error from the tessellated surface to the actual surface must not be greater than __abs_tess_tol__. The *-n* option specifies a surface normal error tolerance (in degrees) for the tessellation. The *-r* option may be used to set a relative error tolerance. This effectively sets an absolute tolerance for each primitive solid by multiplying the overall size of the solid by __rel_tess_tol__. The *-x* and *-X* options are used to set debug flags for _librt_ and the _NMG_ routines respectively. The definitions of these flags may be found in _raytrace.h_ and _nmg.h_. The *-u* option can be used to set the units for the resulting X3D file (the default is mm). Any units name that MGED accepts will work here.
+*g-x3d* evaluates the Boolean operations defined by the named regions in a
+BRL-CAD database (*.g*) file, tessellates the resulting geometry into NMG
+faceted form, and writes it as an X3D (Extensible 3D) scene. Each
+non-light-source region is emitted as a separate X3D *Shape* with an
+*IndexedFaceSet*, and region colors (or default per-thousand region-id colors)
+are written as X3D *Material* nodes. The output is written to the file named
+with *-o*, or to standard output otherwise.
 
-The *-P* option sets the number of processors (default is 1).
+*g-x3d* is a modified version of *g-vrml*(1) and shares its shader and material
+handling; use it when an XML-based X3D scene is preferred over classic VRML.
 
+[[options]]
+== OPTIONS
 
-[[example]]
-== EXAMPLE
+*-v*::
+  Enable verbose output, reporting region conversion progress on standard error.
 
+*-d* _calc_dist_tol_::
+  Calculational distance tolerance, in millimeters, used to distinguish
+  neighboring vertices. The default is 0.0005.
 
+*-a* _abs_tess_tol_::
+  Absolute tessellation tolerance, in millimeters (the maximum chord error
+  permitted between an approximating facet and the true surface). Setting this
+  disables the relative tolerance.
+
+*-r* _rel_tess_tol_::
+  Relative tessellation tolerance, expressed as a fraction of the bounding box
+  of each solid. The default is 0.01.
+
+*-n* _norm_tess_tol_::
+  Surface normal tessellation tolerance, in degrees (the maximum angle between
+  adjacent facet normals). Setting this disables the relative tolerance.
+
+*-u* _units_::
+  Units for coordinates in the resulting X3D file. The default is mm. Any units
+  name understood by BRL-CAD (e.g. mm, cm, m, in, ft) is accepted.
+
+*-P* _ncpu_::
+  Number of processors to use during tessellation. The default is 1.
+
+*-x* _librt_debug_::
+  Set the *librt* debug flags to the given hexadecimal value. See raytrace.h
+  for the bit definitions.
+
+*-X* _nmg_debug_::
+  Set the NMG debug flags to the given hexadecimal value. See nmg.h for the bit
+  definitions.
+
+*-o* _out.x3d_::
+  Write the X3D output to the named file instead of standard output.
+
+*-h*, *-?*::
+  Print a usage message and exit.
+
+[[examples]]
+== EXAMPLES
+
+.Convert selected regions to an X3D file
+====
+[source,bash]
 ----
-
-$ g-x3d -o shell.x3d sample.g sample_object
+g-x3d -o havoc.x3d -u m -r 0.005 havoc.g havoc
 ----
+Tessellates the region tree rooted at object *havoc* in *havoc.g* using a
+relative tolerance of 0.005, scales the output to meters, and writes the
+resulting X3D scene to *havoc.x3d* for viewing in a web browser or X3D viewer.
+====
 
+.Stream output through a pipeline
+====
+[source,bash]
+----
+g-x3d -P 4 sample.g comp1 comp2 > parts.x3d
+----
+Converts two named objects using four processors and redirects the X3D scene to
+*parts.x3d*. Because output defaults to standard output, *g-x3d* can be chained
+with other tools in a pipeline.
+====
 
-[[diagnostics]]
-== DIAGNOSTICS
+[[see_also]]
+== SEE ALSO
 
-Error messages are intended to be self-explanatory.
-
+*brlcad*(1), *g-vrml*(1), *mged*(1)
 
 [[author]]
 == AUTHOR
 
-Robert Parker (The SURVICE Engineering Co., Aberdeen, MD)
-
+BRL-CAD Team
 
 [[copyright]]
 == COPYRIGHT
 
-This software is Copyright (c) 2002-2026 by the United States Government as represented by U.S. Army Research Laboratory.
-
+This software is Copyright (c) 1989-2026 by the United States Government as represented by U.S. Army Research Laboratory.
 
 [[bug_reports]]
 == BUG REPORTS

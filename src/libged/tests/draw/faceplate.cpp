@@ -35,7 +35,8 @@
 
 #include "../../dbi.h"
 
-extern "C" int img_cmp(int id, struct ged *gedp, const char *cdir, bool clear_scene, bool clear_image, int soft_fail, int approximate_check, const char *clear_root, const char *img_root);
+extern "C" int img_cmp(int id, struct ged *gedp, const char *cdir, bool clear_scene, bool clear_image, int soft_fail, fastf_t approximate_check, const char *clear_root, const char *img_root);
+extern "C" int unpack_apng(const char *src_dir, const char *apng_name, const char *out_dir, const char *prefix);
 
 int
 main(int ac, char *av[]) {
@@ -76,9 +77,16 @@ main(int ac, char *av[]) {
     /* Use a local working-directory cache so we do not pollute the user's
      * real BRL-CAD cache and so the test is fully self-contained. */
     char lcache[MAXPATHLEN] = {0};
-    bu_dir(lcache, MAXPATHLEN, BU_DIR_CURR, "ged_fp_test_cache", NULL);
+    char runtime_cache[MAXPATHLEN] = {0};
+    bu_dir(lcache, MAXPATHLEN, BU_DIR_CURR, "ged_draw_test_fp_cache", NULL);
     bu_mkdir(lcache);
-    bu_setenv("BU_DIR_CACHE", lcache, 1);
+    bu_dir(runtime_cache, MAXPATHLEN, BU_DIR_CURR, "ged_draw_test_fp_cache",
+	   "cache", NULL);
+    bu_mkdir(runtime_cache);
+    /* Cache maintenance must not erase extracted image controls. */
+    bu_setenv("BU_DIR_CACHE", runtime_cache, 1);
+
+    unpack_apng(av[1], "faceplate.apng", lcache, "fp");
 
     if (!bu_file_exists(av[1], NULL)) {
 	printf("ERROR: [%s] does not exist, expecting .g file\n", av[1]);
@@ -123,6 +131,16 @@ main(int ac, char *av[]) {
     v->gv_base2local = gedp->dbip->dbi_base2local;
     v->gv_local2base = gedp->dbip->dbi_local2base;
 
+    // The default (fast) wireframe has some differences from
+    // the slower full OpenGL draw path - disable it for the
+    // purposes of these tests.
+    s_av[0] = "dm";
+    s_av[1] = "set";
+    s_av[2] = "fast_wireframe";
+    s_av[3] = "0";
+    s_av[4] = NULL;
+    ged_exec_dm(gedp, 4, s_av);
+
     /***** Sanity - basic wireframe draw *****/
     bu_log("Testing basic db wireframe draw...\n");
     s_av[0] = "draw";
@@ -139,10 +157,10 @@ main(int ac, char *av[]) {
     s_av[2] = "25";
     s_av[3] = NULL;
     ged_exec_ae(gedp, 3, s_av);
-    ret += img_cmp(1, gedp, av[1], true, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(1, gedp, lcache, true, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     // Check that everything is in fact cleared
-    ret += img_cmp(0, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(0, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
     bu_log("Done.\n");
 
     /***** Center Dot *****/
@@ -153,12 +171,12 @@ main(int ac, char *av[]) {
     s_av[3] = "1";
     s_av[4] = NULL;
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(2, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(2, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     // Check that turning off works
     s_av[3] = "0";
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(0, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(0, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
     bu_log("Done.\n");
 
     /***** Grid *****/
@@ -170,12 +188,12 @@ main(int ac, char *av[]) {
     s_av[3] = "1";
     s_av[4] = NULL;
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(3, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(3, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     // Check that turning off works
     s_av[3] = "0";
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(0, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(0, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
     bu_log("Done.\n");
 
     /***** Params *****/
@@ -196,7 +214,7 @@ main(int ac, char *av[]) {
     s_av[3] = "1";
     s_av[4] = NULL;
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(4, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(4, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     bu_log("Testing turning on frames per second reporting...\n");
 
@@ -211,12 +229,12 @@ main(int ac, char *av[]) {
     s_av[4] = "0";
     s_av[5] = NULL;
     ged_exec_view(gedp, 5, s_av);
-    ret += img_cmp(5, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(5, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     // Check that turning off works
     s_av[3] = "0";
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(0, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(0, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
     bu_log("Done.\n");
 
     // Restore default font size
@@ -238,12 +256,12 @@ main(int ac, char *av[]) {
     s_av[3] = "1";
     s_av[4] = NULL;
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(6, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(6, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     // Check that turning off works
     s_av[3] = "0";
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(0, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(0, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
     bu_log("Done.\n");
 
 
@@ -255,12 +273,12 @@ main(int ac, char *av[]) {
     s_av[3] = "1";
     s_av[4] = NULL;
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(7, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(7, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     // Check that turning off works
     s_av[3] = "0";
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(0, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(0, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
     bu_log("Done.\n");
 
     /***** Model axes *****/
@@ -271,12 +289,12 @@ main(int ac, char *av[]) {
     s_av[3] = "1";
     s_av[4] = NULL;
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(8, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(8, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     // Check that turning off works
     s_av[3] = "0";
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(0, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(0, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
     bu_log("Done.\n");
 
     /***** Framebuffer *****/
@@ -294,22 +312,22 @@ main(int ac, char *av[]) {
     s_av[3] = "1";
     s_av[4] = NULL;
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(9, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(9, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     // Check that turning off works
     s_av[3] = "0";
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(0, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(0, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     // Re-enable and make sure clear works
     s_av[3] = "1";
     ged_exec_view(gedp, 4, s_av);
-    ret += img_cmp(9, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(9, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     s_av[0] = "fbclear";
     s_av[1] = NULL;
     ged_exec_fbclear(gedp, 1, s_av);
-    ret += img_cmp(0, gedp, av[1], false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
+    ret += img_cmp(0, gedp, lcache, false, clear_images, soft_fail, 0, "faceplate_clear", "fp");
 
     s_av[0] = "view";
     s_av[1] = "faceplate";
@@ -335,4 +353,3 @@ main(int ac, char *av[]) {
 // c-file-style: "stroustrup"
 // End:
 // ex: shiftwidth=4 tabstop=8
-

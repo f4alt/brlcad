@@ -117,6 +117,13 @@ ltrim_sv(std::string_view sv)
     return sv.substr(i);
 }
 
+static bool
+is_cmake_comment_line(std::string_view line)
+{
+    std::string_view trimmed = ltrim_sv(line);
+    return (!trimmed.empty() && trimmed[0] == '#');
+}
+
 /* Identifier char test */
 static inline bool
 is_ident_char(char c)
@@ -491,7 +498,8 @@ init_repo_config(RepoConfig &cfg)
 	    cfg.api.exemptions.emplace_back(std::make_pair(std::regex(pattern), std::string(fname)));
 	};
 	add_func_ex(".*/bomb[.]c$", "abort");
-	add_func_ex(".*/tests/dirname[.]c$", "dirname");
+	add_func_ex(".*/test_process[.]c$", "abort");
+	add_func_ex(".*/tests/test_dirname[.]c$", "dirname");
 	add_func_ex(".*/file[.]c$", "remove");
 	add_func_ex(".*/libtermio[.]h$", "strncmp");
 
@@ -531,7 +539,9 @@ init_repo_config(RepoConfig &cfg)
     {
 	const char *sp_exempt[] = {
 	    "brledit.cpp",
+	    "check_mann_docs.cpp",
 	    "debug2c.cpp",
+	    "dm_ogl_probe.c",
 	    "env2c.cpp",
 	    "embedded_check.cpp",
 	    "fftc.c",
@@ -541,7 +551,7 @@ init_repo_config(RepoConfig &cfg)
 	    "misc/",
 	    "mt19937ar.c",
 	    "other_check.cpp",
-	    "perm_test.cpp",
+	    "test_perm.cpp",
 	    "rt_ecmd_scanner.cpp",
 	    "sha1.c",
 	    "stb_truetype.h",
@@ -822,6 +832,8 @@ scan_file(const RepoConfig &cfg,
 
 	// Platform symbols
 	if (check_platform && !any_regex_match(cfg.platform.exemptions, path) && !in_block_comment) {
+	    if (fclass == FileClass::Build && is_cmake_comment_line(line))
+		continue;
 	    std::string_view sv = ltrim_sv(sanitized);
 	    bool plausible =
 		(!sv.empty() && (sv[0] == '#' ||

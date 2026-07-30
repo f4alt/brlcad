@@ -331,7 +331,8 @@ ged_lint_core(struct ged *gedp, int argc, const char *argv[])
     int visualize = 0;
     int do_raytrace = 0;
     int do_rt_perturb = 0;
-    fastf_t ftol = VUNITIZE_TOL;
+    struct bn_tol lint_default_tol = BN_TOL_INIT_TOL;
+    fastf_t ftol = lint_default_tol.dist;
     fastf_t min_tri_area = 0.0;
     fastf_t rt_tol_pct = 0.10;
     struct directory **dpa = NULL;
@@ -385,7 +386,10 @@ ged_lint_core(struct ged *gedp, int argc, const char *argv[])
 	bu_vls_printf(gedp->ged_result_str, "\tbot:thin_volume\n");
 	bu_vls_printf(gedp->ged_result_str, "\tbot:unexpected_hit\n");
 	bu_vls_printf(gedp->ged_result_str, "\tbot:unexpected_miss\n");
+	bu_vls_printf(gedp->ged_result_str, "\tarb:concave\n");
+	bu_vls_printf(gedp->ged_result_str, "\tarb:non_coplanar_face\n");
 	bu_vls_printf(gedp->ged_result_str, "\tarb:non_standard_ordering\n");
+	bu_vls_printf(gedp->ged_result_str, "\tarb:twisted\n");
 	bu_vls_printf(gedp->ged_result_str, "\tbrep:opennurbs\n");
 	bu_vls_free(&filter);
 	bu_vls_free(&ofile);

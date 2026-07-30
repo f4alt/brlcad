@@ -35,12 +35,12 @@
 #include "bio.h"
 #include "bnetwork.h"
 
-
 #include "bu/cv.h"
 #include "bu/parse.h"
 #include "vmath.h"
 #include "rt/db5.h"
 #include "rt/geom.h"
+#include "rt/db_instance.h"
 #include "raytrace.h"
 #include "../librt_private.h"
 
@@ -187,7 +187,7 @@ rt_binunif_dump(struct rt_binunif_internal *bip) {
 /**
  * Create the "body" portion of external form
  */
-int
+C_DECL int
 rt_binunif_export5(struct bu_external		*ep,
 		    const struct rt_db_internal	*ip,
 		    double			UNUSED(local2mm), /* we ignore */
@@ -284,7 +284,7 @@ rt_binunif_export5(struct bu_external		*ep,
  * line describes type of object.  Additional lines are indented one
  * tab, and give parameter values.
  */
-int
+C_DECL int
 rt_binunif_describe(struct bu_vls *str, const struct rt_db_internal *ip, int UNUSED(verbose), double UNUSED(mm2local))
 {
     register struct rt_binunif_internal *bip;
@@ -348,7 +348,7 @@ rt_binunif_free(struct rt_binunif_internal *bip) {
  * Free the storage associated with the rt_db_internal version of this
  * thing.
  */
-void
+C_DECL void
 rt_binunif_ifree(struct rt_db_internal *ip)
 {
     struct rt_binunif_internal	*bip;
@@ -362,16 +362,16 @@ rt_binunif_ifree(struct rt_db_internal *ip)
 }
 
 
-int
+C_DECL int
 rt_retrieve_binunif(struct rt_db_internal *intern,
-		    struct db_i	*dbip,
-		    char *name)
+		    const struct db_i *dbip,
+		    const char *name)
 {
     register struct directory	*dp;
     struct rt_binunif_internal	*bip;
     struct bu_external		ext;
     struct db5_raw_internal		raw;
-    char				*tmp;
+    const char				*tmp;
 
     /*
      *Find the guy we're told to write
@@ -454,8 +454,8 @@ rt_retrieve_binunif(struct rt_db_internal *intern,
     return 0;
 }
 
-void
-rt_binunif_make(const struct rt_functab *ftp, struct rt_db_internal *intern)
+C_DECL int
+rt_binunif_make(const struct rt_functab *ftp, struct rt_db_internal *intern, const char *UNUSED(variant), const point_t UNUSED(origin), double UNUSED(scale))
 {
     struct rt_binunif_internal *bip;
 
@@ -471,9 +471,10 @@ rt_binunif_make(const struct rt_functab *ftp, struct rt_db_internal *intern)
     bip->type = DB5_MINORTYPE_BINU_8BITINT;
     bip->count = 0;
     bip->u.int8 = NULL;
+    return BRLCAD_OK;
 }
 
-int
+C_DECL int
 rt_binunif_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *attr)
 {
     register struct rt_binunif_internal *bip=(struct rt_binunif_internal *)intern->idb_ptr;
@@ -525,8 +526,8 @@ rt_binunif_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const
     return BRLCAD_OK;
 }
 
-int
-rt_binunif_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, char **argv)
+C_DECL int
+rt_binunif_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv)
 {
     struct rt_binunif_internal *bip;
     size_t i;
@@ -538,7 +539,7 @@ rt_binunif_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc
     while (argc >= 2) {
 	if (BU_STR_EQUAL(argv[0], "T")) {
 	    int new_type=-1;
-	    char *c;
+	    const char *c;
 	    int type_is_digit=1;
 
 	    c = argv[1];

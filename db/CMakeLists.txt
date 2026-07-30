@@ -139,6 +139,42 @@ function(G_TARGET in_model folder)
   distclean("${log_file}")
 endfunction(G_TARGET in_model folder)
 
+function(PIX_TARGET in_image folder)
+  if(NOT TARGET png-pix)
+    return()
+  endif(NOT TARGET png-pix)
+
+  cmakefiles(${CMAKE_CURRENT_SOURCE_DIR}/${in_image})
+  get_filename_component(in_image_root "${in_image}" NAME_WE)
+  string(REPLACE "${CMAKE_SOURCE_DIR}/" "" rel_dir "${CMAKE_CURRENT_SOURCE_DIR}")
+  set(output_file ${DATA_DIR}/${rel_dir}/${in_image_root}.pix)
+  set(output_path "${CMAKE_BINARY_DIR}/${output_file}")
+  set(conversion_file "${CMAKE_CURRENT_BINARY_DIR}/${in_image_root}_pix.cmake")
+
+  set(PIX_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/${in_image}")
+  set(PIX_OUTPUT "${output_path}")
+  set(PIX_LABEL "${in_image_root}.pix")
+
+  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/${DATA_DIR}/${rel_dir}")
+  configure_file("${CMAKE_SOURCE_DIR}/db/to_pix.cmake.in" "${conversion_file}" @ONLY)
+  distclean("${conversion_file}")
+
+  add_custom_command(
+    OUTPUT ${output_path}
+    COMMAND ${CMAKE_COMMAND} -E remove "${output_path}"
+    COMMAND ${CMAKE_COMMAND} -DEXEC=$<TARGET_FILE:png-pix> -P "${conversion_file}"
+    DEPENDS png-pix "${PIX_INPUT}"
+  )
+  add_custom_target(${in_image_root}.pix ALL DEPENDS ${output_path})
+  set_target_properties(${in_image_root}.pix PROPERTIES FOLDER "${folder}")
+
+  if(BRLCAD_INSTALL_EXAMPLE_GEOMETRY)
+    install(FILES ${output_path} DESTINATION ${DATA_DIR}/${rel_dir})
+  endif(BRLCAD_INSTALL_EXAMPLE_GEOMETRY)
+
+  distclean("${output_path}")
+endfunction(PIX_TARGET in_image folder)
+
 set(
   G_BENCHMARK_MODELS
   bldg391.asc
@@ -152,9 +188,11 @@ set(
 set(
   G_SAMPLE_MODELS
   aet.asc
+  arb8_showcase.asc
   annual_gift_man.asc
   axis.asc
   bearing.asc
+  bicycle_wheel.asc
   boolean-ops.asc
   castle.asc
   cornell.asc
@@ -164,6 +202,7 @@ set(
   cube.asc
   demo.asc
   die.asc
+  earth.asc
   galileo.asc
   goliath.asc
   havoc.asc
@@ -171,6 +210,7 @@ set(
   ktank.asc
   lgt-test.asc
   operators.asc
+  photo_holder.asc
   pic.asc
   pinewood.asc
   primitives.asc
@@ -191,6 +231,12 @@ add_subdirectory(chess)
 add_subdirectory(comgeom)
 add_subdirectory(nist)
 add_subdirectory(faa)
+
+pix_target(earth.png "BRL-CAD Geometry Models/Sample")
+
+if(BRLCAD_INSTALL_EXAMPLE_GEOMETRY)
+  brlcad_adddata(earth.png db)
+endif(BRLCAD_INSTALL_EXAMPLE_GEOMETRY)
 
 foreach(g_input ${G_BENCHMARK_MODELS})
   g_target(${g_input} "BRL-CAD Geometry Models/Benchmark")
@@ -286,10 +332,12 @@ cmakefiles(
   cube.rt
   db.php
   ebm_logo.bw
+  earth.png
   include/ctype.inc
   include/debug.inc
   terra.bin
   to_g.cmake.in
+  to_pix.cmake.in
   traffic_light.rt
   vol_data.bw
 )

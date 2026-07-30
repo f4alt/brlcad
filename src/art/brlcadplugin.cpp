@@ -1,4 +1,4 @@
-/*                     A R T P L U G I N . C P P
+/*               B R L C A D P L U G I N . C P P
  * BRL-CAD
  *
  * Copyright (c) 2004-2026 United States Government as represented by
@@ -201,7 +201,7 @@ BrlcadObject:: BrlcadObject(
     VSET(max, m_params.get_required<double>("maxX"), m_params.get_required<double>("maxY"), m_params.get_required<double>("maxZ"));
 
     std::string db_file = m_params.get_required<std::string>("database_path");
-    this->rtip = rt_new_rti(p_ap->a_rt_i->rti_dbip);
+    this->rtip = rt_i_create(p_ap->a_rt_i->rti_dbip);
     if (this->rtip == RTI_NULL) {
         RENDERER_LOG_INFO("building the database directory for [%s] FAILED\n", db_file.c_str());
         bu_exit(BRLCAD_ERROR, "building the database directory for [%s] FAILED\n", db_file.c_str());
@@ -407,7 +407,7 @@ BrlcadObject::get_objects() const
     std::vector<std::string> objects;
     int count = get_object_count();
 
-    for (char i = 0; i < count; i++) {
+    for (int i = 0; i < count; i++) {
 	std::string obj_num = "object." + std::to_string(i + 1);
 	objects.push_back(m_params.get_path_required<std::string>(obj_num.c_str(), ""));
     }

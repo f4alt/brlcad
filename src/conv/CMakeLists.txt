@@ -73,12 +73,12 @@ brlcad_addexec(g5-g4 g5-g4.c "libwdb;librt;libbu" NO_INSTALL)
 
 brlcad_addexec(g-acad g-acad.c "librt;libnmg;libbu" FOLDER Conv)
 
-brlcad_addexec(g-obj g-obj.c "librt;libnmg;libbu" FOLDER Conv)
+brlcad_addexec(g-obj g-obj.c "librt;libnmg;libbu;${M_LIBRARY}" FOLDER Conv)
 
 # TODO - Ugh; need to either merge this into libgcv or remove it in favor of
 # that implementation...
 set(obj-g_SRCS obj-g.c ../libgcv/plugins/obj/tri_face.c)
-brlcad_addexec(obj-g "${obj-g_SRCS}" "libbu;libbn;librt;libnmg;libwdb;libwfobj" FOLDER Conv)
+brlcad_addexec(obj-g "${obj-g_SRCS}" "libbu;libbn;librt;libnmg;libwdb;libwfobj;${M_LIBRARY}" FOLDER Conv)
 target_include_directories(obj-g PRIVATE ${BRLCAD_SOURCE_DIR}/src/libgcv/plugins/obj)
 target_include_directories(obj-g PRIVATE ${BRLCAD_SOURCE_DIR}/src/libgcv/plugins/obj/wfobj)
 

@@ -53,11 +53,6 @@
 #define	LGT_FLOAT	1
 
 
-extern	struct fb *fbp;
-extern	FILE	*outfp;
-extern	fastf_t	viewsize;
-extern	int	lightmodel;
-
 unsigned char *scanbuf;
 static int pixsize = 0;		/* bytes per pixel in scanbuf */
 static double	contrast_boost = 2.0;
@@ -72,7 +67,7 @@ struct bu_structparse view_parse[] = {
 static char *floatfilename=NULL;
 const char floatfileext[] = ".los";
 
-const char title[] = "RT X-Ray";
+EXTERNCPP const char title[] = "RT X-Ray";
 
 /*
  *  Called at the start of a run.
@@ -313,7 +308,7 @@ xraymiss(register struct application *ap)
 }
 
 
-void
+C_DECL void
 application_init (void)
 {
     option("", "-o file.bw", "Output black & white image filename", 0);

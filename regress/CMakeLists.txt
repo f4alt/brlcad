@@ -68,11 +68,20 @@ add_subdirectory(mged)
 # moss.g Regression Tests
 add_subdirectory(moss)
 
+# NACA 4/5/6 wing generator Regression Tests
+add_subdirectory(naca456)
+
 # NIRT Regression Tests
 add_subdirectory(nirt)
 
 # NURBS Regression Tests
 add_subdirectory(nurbs)
+
+# fbserv Token-Isolation Stress Tests
+add_subdirectory(fbserv)
+
+# fbs_open_ipc / libtclcad IPC Data-Path Regression Tests
+add_subdirectory(ipc)
 
 # libpkg Regression Tests
 add_subdirectory(pkg)
@@ -83,14 +92,23 @@ add_subdirectory(red)
 # Repository check
 add_subdirectory(repository)
 
+# remrt Network Distributed RT Regression Tests
+add_subdirectory(remrt)
+
 # rtedge Regression Tests
 add_subdirectory(rtedge)
 
 # RtWizard Image Generation Regression Tests
 add_subdirectory(rtwizard)
 
+# per-primitive validity
+add_subdirectory(rt_primitives)
+
 # Simulation of a 3rd party BRL-CAD library client code
 add_subdirectory(user)
+
+# Procedural tree shape generator Regression Tests
+add_subdirectory(tree)
 
 # solids Regression Tests
 add_subdirectory(solids)
@@ -103,6 +121,9 @@ add_subdirectory(shaders)
 
 # rtweight command tests
 add_subdirectory(weight)
+
+# ttcp tests
+add_subdirectory(ttcp)
 
 if(SH_EXEC)
   brlcad_add_test(NAME regress-usage COMMAND ${SH_EXEC} "${CMAKE_SOURCE_DIR}/regress/usage.sh" ${CMAKE_SOURCE_DIR})

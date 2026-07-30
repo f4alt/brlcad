@@ -34,6 +34,7 @@
 #include "bu/debug.h"
 #include "bu/file.h"
 #include "bu/getopt.h"
+#include "bu/malloc.h"
 #include "bu/opt.h"
 #include "bu/parallel.h"
 #include "bu/units.h"
@@ -108,7 +109,7 @@ size_t incr_nlevel = 0;                 /* number of levels */
 size_t full_incr_sample = 0;            /* current fully incremental sample */
 size_t full_incr_nsamples = 0;          /* number of samples in the fully incremental mode */
 ssize_t npsw = 1;                        /* number of worker PSWs to run */
-struct resource resource[MAX_PSW] = {0};      /* memory resources */
+struct resource resource[MAX_PSW] = {RT_RESOURCE_INIT_ZERO};      /* memory resources */
 int top_down = 0;                       /* render image top-down or bottom-up (default) */
 int random_mode = 0;                    /* Mode to shoot rays at random directions */
 int opencl_mode = 0;                    /* enable/disable OpenCL */
@@ -178,16 +179,13 @@ fastf_t rt_perp_tol = (fastf_t)0.0;     /* Value for rti_tol.perp */
 char *framebuffer = NULL;       /* desired framebuffer */
 
 /**
- * space partitioning algorithm to use.  previously had experimental
- * grid support, but now only uses a Non-uniform Binary Spatial
- * Partitioning (BSP) tree.
+ * Space partitioning algorithm to use.  The default is the
+ * non-uniform binary spatial partitioning tree; librt prep may override
+ * this at runtime via LIBRT_SPACE_PARTITION.
  */
 int space_partition = RT_PART_NUBSPT;
 
 #define MAX_WIDTH (32*1024)
-
-
-extern struct command_tab rt_do_tab[];
 
 
 /* this helper function is used to increase a bit variable through
@@ -304,28 +302,66 @@ rt_opt_subgrid(struct bu_vls *msg, size_t argc, const char **argv, void *UNUSED(
 }
 
 
-/* -k / --cut-plane  xd,yd,zd,dist */
+/* -k / --cut-plane  xd,yd,zd,dist OR x,y,z,nx,ny,nz OR x,y,z */
 static int
 rt_opt_cut_plane(struct bu_vls *msg, size_t argc, const char **argv, void *UNUSED(set_var))
 {
     fastf_t f;
-    double scan[4];
+    point_t pt;
+    vect_t nrml;
+    const char *arg = argv[0];
+    char *scan_arg;
+    double scan[6];
     int n;
+    size_t i, j, len;
     BU_OPT_CHECK_ARGV0(msg, argc, argv, "cut-plane");
     do_kut_plane = 1;
-    n = sscanf(argv[0], "%lg,%lg,%lg,%lg",
-	       &scan[0], &scan[1], &scan[2], &scan[3]);
-    if (n != 4) {
-	/* try with spaces after commas */
-	n = sscanf(argv[0], "%lg, %lg, %lg, %lg",
-		   &scan[0], &scan[1], &scan[2], &scan[3]);
+
+    len = strlen(arg);
+    scan_arg = (char *)bu_malloc(len + 1, "cut-plane parse buffer");
+    for (i = 0, j = 0; i < len; i++) {
+	if (!isspace((unsigned char)arg[i]))
+	    scan_arg[j++] = arg[i];
     }
+    scan_arg[j] = '\0';
+
+    n = sscanf(scan_arg, "%lg,%lg,%lg,%lg,%lg,%lg",
+	       &scan[0], &scan[1], &scan[2], &scan[3], &scan[4], &scan[5]);
+    if (n == 6) {
+	VSET(pt, scan[0], scan[1], scan[2]);
+	VSET(nrml, scan[3], scan[4], scan[5]);
+	f = MAGNITUDE(nrml);
+	if (f <= SQRT_SMALL_FASTF)
+	    bu_exit(EXIT_FAILURE, "ERROR: bad normal for cutting plane, length=%g\n", f);
+	VUNITIZE(nrml);
+	VMOVE(kut_plane, nrml);
+	/* Plane form is N . X = d, so derive d from the supplied point. */
+	kut_plane[W] = VDOT(pt, nrml);
+	bu_free(scan_arg, "cut-plane parse buffer");
+	return 1;
+    }
+
+    n = sscanf(scan_arg, "%lg,%lg,%lg,%lg",
+	       &scan[0], &scan[1], &scan[2], &scan[3]);
+    if (n == 3) {
+	VSET(pt, scan[0], scan[1], scan[2]);
+	VSET(nrml, scan[0], scan[1], scan[2]);
+	f = MAGNITUDE(nrml);
+	if (f <= SQRT_SMALL_FASTF)
+	    bu_exit(EXIT_FAILURE, "ERROR: bad normal for cutting plane, length=%g\n", f);
+	VUNITIZE(nrml);
+	VMOVE(kut_plane, nrml);
+	kut_plane[W] = VDOT(pt, nrml);
+	bu_free(scan_arg, "cut-plane parse buffer");
+	return 1;
+    }
+    bu_free(scan_arg, "cut-plane parse buffer");
     if (n != 4)
-	bu_exit(EXIT_FAILURE, "ERROR: bad cutting plane\n");
+	bu_exit(EXIT_FAILURE, "ERROR: bad cutting plane, expected xdir,ydir,zdir,dist or x,y,z,nx,ny,nz or x,y,z\n");
     HMOVE(kut_plane, scan); /* double to fastf_t */
     f = MAGNITUDE(kut_plane);
-    if (f <= SMALL)
-	bu_exit(EXIT_FAILURE, "Bad normal for cutting plane, length=%g\n", f);
+    if (f <= SQRT_SMALL_FASTF)
+	bu_exit(EXIT_FAILURE, "ERROR: bad normal for cutting plane, length=%g\n", f);
     f = 1.0 / f;
     VSCALE(kut_plane, kut_plane, f);
     kut_plane[W] *= f;
@@ -631,7 +667,7 @@ rt_opt_light_model(struct bu_vls *msg, size_t argc, const char **argv, void *UNU
     if (lightmodel == 7) {
 	char *buf = bu_strdup(argv[0]); /* strtok modifies its input */
 	char *item;
-	item = strtok(buf, ", "); /* consume the model number itself */
+	(void)strtok(buf, ", "); /* consume the model number itself */
 	/* Photon mapping arguments */
 	item = strtok(NULL, ", ");
 	pmargs[0] = item ? atoi(item) : 16384;  /* Number of Global Photons */
@@ -875,11 +911,6 @@ rt_opt_plus(struct bu_vls *msg, size_t argc, const char **argv, void *UNUSED(set
  * Option descriptor table
  *
  * Each row is:  { shortopt, longopt, arg_helpstr, callback, set_var, help }
- *
- * Options marked "DEPRECATED SHORT FORM" use a letter whose conventional
- * meaning in other Unix tools differs from rt's meaning.  They remain fully
- * functional for now for backward compatibility; callers should prefer the
- * long form.
  * ======================================================================= */
 
 static struct bu_opt_desc opt_defs[] = {
@@ -919,7 +950,7 @@ static struct bu_opt_desc opt_defs[] = {
     {"E",  "eye-backoff",     "#",       bu_opt_fastf_t,       &eye_backoff,
      "Distance from eye to model center (default sqrt(2))"},
     {"V",  "view-aspect",     "#[:#]",   rt_opt_view_aspect,   NULL,
-     "View aspect ratio width/height (e.g. 1.33 or 4:3)"},  /* DEPRECATED SHORT FORM: -V commonly means --version */
+     "View aspect ratio width/height (e.g. 1.33 or 4:3)"},
     {"M",  "read-matrix",     "",        NULL,       &matflag,
      "Read model2view matrix (+ animation script) from stdin"},
 
@@ -930,7 +961,7 @@ static struct bu_opt_desc opt_defs[] = {
      "Grid cell height in mm"},
     {"j",  "subgrid",         "xmin,ymin,xmax,ymax", rt_opt_subgrid, NULL,
      "Raytrace only a sub-rectangle of the view"},
-    {"k",  "cut-plane",       "xd,yd,zd,dist", rt_opt_cut_plane, NULL,
+    {"k",  "cut-plane",       "xdir,ydir,zdir,dist | x,y,z,nx,ny,nz | x,y,z", rt_opt_cut_plane, NULL,
      "Apply a cutting plane (equivalent to subtracting a halfspace)"},
 
     /* --- Rendering parameters ------------------------------------------ */
@@ -949,7 +980,7 @@ static struct bu_opt_desc opt_defs[] = {
     {"H",  "hypersample",     "#",       rt_opt_hypersample,   NULL,
      "Number of extra rays per pixel (also enables -J 1)"},
     {"J",  "jitter",          "#",       rt_opt_jitter,        NULL,
-     "Ray jitter bit vector (1=cell jitter, 2=frame shift, 3=both)"},  /* DEPRECATED SHORT FORM: -J commonly means --jobs */
+     "Ray jitter bit vector (1=cell jitter, 2=frame shift, 3=both)"},
     {"u",  "units",           "units",   rt_opt_units,         NULL,
      "Display units (\"model\" uses model-space units)"},
     {"U",  "use-air",         "#",       bu_opt_int, &use_air,
@@ -965,7 +996,7 @@ static struct bu_opt_desc opt_defs[] = {
     {"d",  "density-file",    "file",    bu_opt_str, &densityfile,
      "Density definitions file"},
     {"D",  "start-frame",     "#",       bu_opt_int, &desiredframe,
-     "Starting frame number for animation"},  /* DEPRECATED SHORT FORM: -D typically means --define or --debug */
+     "Starting frame number for animation"},
     {"K",  "end-frame",       "#",       bu_opt_int, &finalframe,
      "Ending (kill-after) frame number for animation"},
 
@@ -973,7 +1004,7 @@ static struct bu_opt_desc opt_defs[] = {
     {"b",  "single-pixel",    "\"x y\"", rt_opt_single_pixel,  NULL,
      "Shoot one debug ray at pixel (x, y); forces serial execution"},
     {"Q",  "query-pixel",     "x,y",     rt_opt_query_pixel,   NULL,
-     "Compute full image but enable debug for pixel (x,y)"},  /* DEPRECATED SHORT FORM: -Q sometimes means --quiet */
+     "Compute full image but enable debug for pixel (x,y)"},
 
     /* --- Object input -------------------------------------------------- */
     {"I",  "objects-file",    "file",    rt_opt_objects_file,  NULL,
@@ -1001,7 +1032,7 @@ static struct bu_opt_desc opt_defs[] = {
     {"P",  "cpus",            "#",       rt_opt_cpus,          NULL,
      "Max processor cores to use (negative = all but N)"},
     {"B",  "benchmark",       "",        rt_opt_benchmark,     NULL,
-     "Benchmark mode: disable all intentional randomness (dither, etc.)"},  /* DEPRECATED SHORT FORM: -B commonly means --binary or --batch */
+     "Benchmark mode: disable all intentional randomness (dither, etc.)"},
 
     /* --- Space partition (temporarily disabled) ------------------------ */
     {",",  "",                "",        rt_opt_comma_disabled,NULL,
@@ -1083,6 +1114,8 @@ get_args(int argc, const char *argv[])
 			    /* Emit "-X" as a fresh string and VALUE as a pointer into tok */
 			    char *flag = (char *)bu_malloc(3, "rt short opt split");
 			    flag[0] = '-'; flag[1] = tok[1]; flag[2] = '\0';
+			    if (!split_flags)
+				bu_bomb("rt short option split bookkeeping missing");
 			    split_flags[n_split_used++] = flag;
 			    opt_argv[out++] = flag;
 			    opt_argv[out++] = tok + 2;

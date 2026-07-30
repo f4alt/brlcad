@@ -725,7 +725,7 @@ bu_dirclear(const char *d)
 	    if (BU_STR_EQUAL(filenames[i], ".."))
 		continue;
 	    char cdir[MAXPATHLEN] = {0};
-	    bu_dir(cdir, MAXPATHLEN, d, filenames[i], NULL);
+	    bu_dir(cdir, MAXPATHLEN, d, filenames[i], (const char *)NULL);
 	    bu_dirclear((const char *)cdir);
 	}
 	bu_argv_free(nfiles, filenames);

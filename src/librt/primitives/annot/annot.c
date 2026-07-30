@@ -105,7 +105,7 @@ rt_txt_pos_flag(int *pos_flag, int p_hor, int p_ver)
 
 
 static int
-ant_check_pos(const struct txt_seg *tsg, char **rel_pos)
+ant_check_pos(const struct txt_seg *tsg, const char **rel_pos)
 {
     switch (tsg->rel_pos) {
 	case RT_TXT_POS_BL:
@@ -303,7 +303,7 @@ ant_check(const struct rt_ant *ant, const struct rt_annot_internal *annot_ip, in
  * !0 Error in description
  *
  */
-int
+C_DECL int
 rt_annot_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 {
     if (!stp)
@@ -317,7 +317,7 @@ rt_annot_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 }
 
 
-void
+C_DECL void
 rt_annot_print(const struct soltab *stp)
 {
     if (stp) RT_CK_SOLTAB(stp);
@@ -332,7 +332,7 @@ rt_annot_print(const struct soltab *stp)
  * 0 MISS
  * >0 HIT
  */
-int
+C_DECL int
 rt_annot_shot(struct soltab *stp, struct xray *rp, struct application *ap, struct seg *seghead)
 {
     if (!stp || !rp || !ap || !seghead)
@@ -350,9 +350,25 @@ rt_annot_shot(struct soltab *stp, struct xray *rp, struct application *ap, struc
 
 
 /**
+ * Vectorized rt_annot_shot(): annotations cannot be ray traced, so every
+ * ray in the batch misses.
+ */
+C_DECL void
+rt_annot_vshot(struct soltab **stp, struct xray **UNUSED(rp), struct seg *segp, int n, struct application *ap)
+{
+    int i;
+    if (ap) RT_CK_APPLICATION(ap);
+    for (i = 0; i < n; i++) {
+	if (stp[i] == 0) continue;		/* skip this ray */
+	segp[i].seg_stp = (struct soltab *)0;	/* always MISS */
+    }
+}
+
+
+/**
  * Given ONE ray distance, return the normal and entry/exit point.
  */
-void
+C_DECL void
 rt_annot_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
 {
     if (!hitp || !rp)
@@ -369,7 +385,7 @@ rt_annot_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
 /**
  * Return the curvature of the annotation.
  */
-void
+C_DECL void
 rt_annot_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
 {
     if (!cvp || !hitp)
@@ -384,7 +400,7 @@ rt_annot_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
 }
 
 
-void
+C_DECL void
 rt_annot_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct uvcoord *uvp)
 {
     if (ap) RT_CK_APPLICATION(ap);
@@ -395,7 +411,7 @@ rt_annot_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct
 }
 
 
-void
+C_DECL void
 rt_annot_free(struct soltab *stp)
 {
     if (stp) RT_CK_SOLTAB(stp);
@@ -833,7 +849,7 @@ ant_to_vlist(struct bu_list *vlfree, struct bu_list *vhead, const struct bg_tess
 }
 
 
-int
+C_DECL int
 rt_annot_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_tess_tol *ttol, const struct bn_tol *UNUSED(tol), const struct bview *UNUSED(info))
 {
     struct rt_annot_internal *annot_ip;
@@ -856,7 +872,7 @@ rt_annot_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_
     return myret;
 }
 
-int
+C_DECL int
 rt_annot_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !ip || !mat)
@@ -878,7 +894,7 @@ rt_annot_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_int
  * Import an annotation from the database format to the internal format.
  * Apply modeling transformations as well.
  */
-int
+C_DECL int
 rt_annot_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     struct rt_annot_internal *annot_ip;
@@ -1025,7 +1041,7 @@ rt_annot_import5(struct rt_db_internal *ip, const struct bu_external *ep, const 
 		    bu_cv_ntohd((unsigned char *)scanp, ptr, nsg->c_size);
 
 		    /* convert double to fastf_t */
-		    for (i=0; i<(size_t)nsg->k.k_size; i++) {
+		    for (i=0; i<(size_t)nsg->c_size; i++) {
 			nsg->weights[i] = scanp[i];
 		    }
 		    bu_free(scanp, "scanp");
@@ -1073,7 +1089,7 @@ rt_annot_import5(struct rt_db_internal *ip, const struct bu_external *ep, const 
 /**
  * The name is added by the caller, in the usual place.
  */
-int
+C_DECL int
 rt_annot_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_annot_internal *annot_ip;
@@ -1295,7 +1311,7 @@ rt_annot_export5(struct bu_external *ep, const struct rt_db_internal *ip, double
  * line describes type of solid.  Additional lines are indented one
  * tab, and give parameter values.
  */
-int
+C_DECL int
 rt_annot_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local)
 {
     struct rt_annot_internal *annot_ip =
@@ -1372,7 +1388,7 @@ rt_annot_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbo
 			    V2INTCLAMPARGS(annot_ip->verts[tsg->ref_pt]));
 		}
 		bu_vls_strcat(str, buf);
-		ant_check_pos(tsg, &rel_pos);
+		ant_check_pos(tsg, (const char **)&rel_pos);
 		sprintf(buf, "\t\tRelative position: %s\n", rel_pos);
 		bu_vls_strcat(str, buf);
 		sprintf(buf, "\tLabel text: %s\n", bu_vls_addr(&tsg->label));
@@ -1564,7 +1580,7 @@ rt_ant_free(struct rt_ant *ant)
  * Free the storage associated with the rt_db_internal version of this
  * solid.
  */
-void
+C_DECL void
 rt_annot_ifree(struct rt_db_internal *ip)
 {
     struct rt_annot_internal *annot_ip;
@@ -1701,7 +1717,6 @@ static int
 ant_to_tcl_list(struct bu_vls *vls, struct rt_ant *ant)
 {
     size_t i, j;
-    char *rel_pos = NULL;
 
     bu_vls_printf(vls, " SL {");
     for (j=0; j<ant->count; j++) {
@@ -1715,8 +1730,7 @@ ant_to_tcl_list(struct bu_vls *vls, struct rt_ant *ant)
 	    case ANN_TSEG_MAGIC:
 		{
 		    struct txt_seg *tsg = (struct txt_seg *)ant->segments[j];
-		    ant_check_pos(tsg, &rel_pos);
-		    bu_vls_printf(vls, " { label %s ref_pt %d position %s txt_size %.25g txt_rot_angle %.25g }", bu_vls_addr(&tsg->label), tsg->ref_pt, rel_pos, tsg->txt_size, tsg->txt_rot_angle);
+		    bu_vls_printf(vls, " { txt R %d P %d L {%s} S %.25g A %.25g }", tsg->ref_pt, tsg->rel_pos, bu_vls_addr(&tsg->label), tsg->txt_size, tsg->txt_rot_angle);
 		}
 		break;
 	    case CURVE_CARC_MAGIC:
@@ -1763,7 +1777,7 @@ ant_to_tcl_list(struct bu_vls *vls, struct rt_ant *ant)
 }
 
 
-int
+C_DECL int
 rt_annot_form(struct bu_vls *logstr, const struct rt_functab *ftp)
 {
     BU_CK_VLS(logstr);
@@ -1775,7 +1789,7 @@ rt_annot_form(struct bu_vls *logstr, const struct rt_functab *ftp)
 }
 
 
-int
+C_DECL int
 rt_annot_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *attr)
 {
     struct rt_annot_internal *ann=(struct rt_annot_internal *)intern->idb_ptr;
@@ -1786,7 +1800,7 @@ rt_annot_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const c
     RT_ANNOT_CK_MAGIC(ann);
 
     if (attr == (char *)NULL) {
-	bu_vls_strcpy(logstr, "annotation");
+	bu_vls_strcpy(logstr, "annot");
 	bu_vls_printf(logstr, " V {%.25g %.25g %.25g}", V3ARGS(ann->V));
 	bu_vls_strcat(logstr, " VL {");
 	for (i=0; i<ann->vert_count; i++)
@@ -1851,10 +1865,15 @@ ant_get_tcl(struct bu_vls *logstr, struct rt_ant *ant, const char *argv1)
 
 	/* get the next segment */
 	if (bu_argv_from_tcl_list(seg_list[j], &seg_argc, (const char ***)&seg_argv) != 0) {
+	    bu_free((char *)seg_list, "free seg list");
 	    return -1;
 	}
 
-	if (seg_argc < 1) return 0;
+	if (seg_argc < 1) {
+	    bu_free((char *)seg_argv, "free seg argv");
+	    bu_free((char *)seg_list, "free seg list");
+	    return 0;
+	}
 
 	/* get the next segment */
 	if (BU_STR_EQUAL(seg_argv[0], "line")) {
@@ -1879,6 +1898,7 @@ ant_get_tcl(struct bu_vls *logstr, struct rt_ant *ant, const char *argv1)
 	    struct txt_seg *tsg;
 
 	    BU_ALLOC(tsg, struct txt_seg);
+	    bu_vls_init(&tsg->label);
 	    for (k=1; k<seg_argc; k+= 2) {
 		elem = seg_argv[k];
 		sval = seg_argv[k+1];
@@ -1891,6 +1911,12 @@ ant_get_tcl(struct bu_vls *logstr, struct rt_ant *ant, const char *argv1)
 			break;
 		    case 'L': /* label text */
 			(void)bu_opt_vls(NULL, 1, &sval, (void *)&tsg->label);
+			break;
+		    case 'S': /* text size */
+			(void)bu_opt_fastf_t(NULL, 1, &sval, (void *)&tsg->txt_size);
+			break;
+		    case 'A': /* text rotation angle */
+			(void)bu_opt_fastf_t(NULL, 1, &sval, (void *)&tsg->txt_rot_angle);
 			break;
 		}
 	    }
@@ -1913,8 +1939,11 @@ ant_get_tcl(struct bu_vls *logstr, struct rt_ant *ant, const char *argv1)
 			(void)_rt_tcl_list_to_int_array(sval, &bsg->ctl_points, &num_points);
 			if (num_points != bsg->degree + 1) {
 			    bu_vls_printf(logstr, "ERROR: degree and number of control points disagree for a Bezier segment\n");
+			    if (bsg->ctl_points)
+				bu_free((char *)bsg->ctl_points, "bsg->ctl_points");
+			    bu_free((char *)bsg, "bsg");
 			    bu_free((char *)seg_argv, "free seg argv");
-			    bu_free((char *)seg_list, "free seg argv");
+			    bu_free((char *)seg_list, "free seg list");
 			    return 1;
 			}
 		}
@@ -1969,7 +1998,14 @@ ant_get_tcl(struct bu_vls *logstr, struct rt_ant *ant, const char *argv1)
 			(void)_rt_tcl_list_to_int_array(sval, &nsg->ctl_points, &nsg->c_size);
 			break;
 		    case 'W':
-			(void)_rt_tcl_list_to_fastf_array(sval, &nsg->weights, &nsg->c_size);
+			{
+			    /* Use a local length: c_size may already be set by
+			     * the 'P' case and the func only allocates when 
+			     * the last value is '0'. We intentionally 
+			     * throw away the value as it is == nsg->c_size */
+			    int wlen = 0;
+			    (void)_rt_tcl_list_to_fastf_array(sval, &nsg->weights, &wlen);
+			}
 			break;
 		}
 	    }
@@ -1991,7 +2027,7 @@ ant_get_tcl(struct bu_vls *logstr, struct rt_ant *ant, const char *argv1)
 }
 
 
-int
+C_DECL int
 rt_annot_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv)
 {
     struct rt_annot_internal *annot_ip;
@@ -2048,9 +2084,9 @@ rt_annot_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, 
 	    struct rt_ant *ant;
 
 	    ant = &annot_ip->ant;
-	    ant->count = 0;
-	    ant->reverse = (int *)NULL;
-	    ant->segments = (void **)NULL;
+	    /* free any previously-populated segment list before rebuilding
+	     * (rt_ant_free is a safe no-op when count == 0) */
+	    rt_ant_free(ant);
 
 	    if ((ret=ant_get_tcl(logstr, ant, argv[1])) != 0)
 		return ret;
@@ -2080,7 +2116,7 @@ rt_annot_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, 
 }
 
 
-int
+C_DECL int
 rt_annot_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
 {
     if (ip) RT_CK_DB_INTERNAL(ip);
@@ -2088,7 +2124,7 @@ rt_annot_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
     return 0;			/* OK */
 }
 
-const char *
+C_DECL const char *
 rt_annot_keypoint(point_t *pt, const char *keystr, const mat_t mat, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     if (!pt || !ip)

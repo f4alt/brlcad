@@ -82,8 +82,17 @@ create_boxes(void *callBackData, int x, int y, int z, const char *a, fastf_t fil
 	    max[2] = (dataValues->bbMin)[2] + ( (z + 1.0) * (dataValues->sizeVoxel)[2]);
 
 	    nameDestination = bu_vls_strgrab(vp);
-	    mk_rpp(dataValues->wdbp,nameDestination, min, max);
-	    mk_addmember(nameDestination, &dataValues->content.l, 0, WMOP_UNION);
+
+	    /* guard against duplicate rpp's
+	     *	voxelize() calls this once per region - NOT once per voxel. So overlapping
+	     *	regions can/will create duplicate solids in the tree
+	     */
+	    if (db_lookup(dataValues->wdbp->dbip, nameDestination, LOOKUP_QUIET) == RT_DIR_NULL) {
+		mk_rpp(dataValues->wdbp, nameDestination, min, max);
+		mk_addmember(nameDestination, &dataValues->content.l, 0, WMOP_UNION);
+	    }
+
+	    bu_free(nameDestination, "free nameDestination strgrab");
 	}
     }
     /* else this voxel is air */
@@ -180,7 +189,7 @@ ged_voxelize_core(struct ged *gedp, int argc, const char *argv[])
 	return BRLCAD_ERROR;
     }
 
-    rtip = rt_new_rti(gedp->dbip);
+    rtip = rt_i_create(gedp->dbip);
     rtip->useair = 1;
 
     /* Walk trees.  Here we identify any object trees in the database
@@ -214,7 +223,7 @@ ged_voxelize_core(struct ged *gedp, int argc, const char *argv[])
     mk_comb(wdbp, voxDat.newname, &voxDat.content.l, 1, "plastic", "sh=4 sp=0.5 di=0.5 re=0.1", 0, 1000, 0, 0, 100, 0, 0, 0);
 
     mk_freemembers(&voxDat.content.l);
-    rt_free_rti(rtip);
+    rt_i_destroy(rtip);
 
     return BRLCAD_OK;
 }

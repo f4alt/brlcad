@@ -26,6 +26,7 @@
 
 #include "common.h"
 
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -37,9 +38,7 @@
 #include "dm.h"
 #include "pkg.h"
 
-char *options = "iHoF:h?";
-
-void checkgamma(double g);
+const char *options = "iHoF:h?";
 
 unsigned char rampval[10] = { 255, 128, 64, 32, 16, 8, 4, 2, 1, 0 };
 int x, y, scr_width, scr_height, patch_width, patch_height;
@@ -51,7 +50,35 @@ int image = 0;
 static char usage[] = "\
 Usage: fbgamma [-H -o -i] [-F framebuffer] val [gval bval]\n";
 
-void mk_ramp(struct fb *fb_i, int r, int g, int b, int n)
+
+static void
+checkgamma(double g)
+{
+    if (fabs(g) < 1.0e-10) {
+	fprintf(stderr, "fbgamma: gamma too close to zero\n");
+	bu_exit(3, "%s", usage);
+    }
+}
+
+static int
+parse_gamma(const char *arg, double *g, const char *label)
+{
+    char *end = NULL;
+
+    errno = 0;
+    *g = strtod(arg, &end);
+    if (arg[0] == '\0' || end == arg || *end != '\0' || errno != 0) {
+	fprintf(stderr, "fbgamma: invalid %s '%s'\n", label, arg);
+	return 0;
+    }
+
+    checkgamma(*g);
+    return 1;
+}
+
+
+static void
+mk_ramp(struct fb *fb_i, int r, int g, int b, int n)
 {
 
     /* grey ramp */
@@ -82,7 +109,8 @@ void mk_ramp(struct fb *fb_i, int r, int g, int b, int n)
 }
 
 
-void disp_image(struct fb *fb_i)
+static void
+disp_image(struct fb *fb_i)
 {
 
     scr_width = fb_getwidth(fb_i);
@@ -114,6 +142,7 @@ main(int argc, char **argv)
     int onegamma = 0;
     int fbsize = 512;
     int overlay = 0;
+    int remaining = 0;
     double gamr = 0, gamg = 0, gamb = 0;	/* gamma's */
     double f;
     ColorMap cm;
@@ -135,22 +164,23 @@ main(int argc, char **argv)
 	}
     }
 
-    if (bu_optind == argc - 1) {
+    remaining = argc - bu_optind;
+    if (remaining == 1) {
 	/* single value for all channels */
-	f = atof(argv[bu_optind]);
-	checkgamma(f);
+	if (!parse_gamma(argv[bu_optind], &f, "gamma"))
+	    bu_exit(1, "%s", usage);
 	gamr = gamg = gamb = 1.0 / f;
 	onegamma++;
-    } else if (bu_optind == argc - 4) {
+    } else if (remaining == 3) {
 	/* different RGB values */
-	f = atof(argv[bu_optind]);
-	checkgamma(f);
+	if (!parse_gamma(argv[bu_optind], &f, "red gamma"))
+	    bu_exit(1, "%s", usage);
 	gamr = 1.0 / f;
-	f = atof(argv[bu_optind+1]);
-	checkgamma(f);
+	if (!parse_gamma(argv[bu_optind+1], &f, "green gamma"))
+	    bu_exit(1, "%s", usage);
 	gamg = 1.0 / f;
-	f = atof(argv[bu_optind+2]);
-	checkgamma(f);
+	if (!parse_gamma(argv[bu_optind+2], &f, "blue gamma"))
+	    bu_exit(1, "%s", usage);
 	gamb = 1.0 / f;
     } else {
 	bu_exit(1, "%s", usage);
@@ -198,16 +228,6 @@ main(int argc, char **argv)
     fb_wmap(fbp, &cm);
     fb_close(fbp);
     return 0;
-}
-
-
-void
-checkgamma(double g)
-{
-    if (fabs(g) < 1.0e-10) {
-	fprintf(stderr, "fbgamma: gamma too close to zero\n");
-	bu_exit(3, "%s", usage);
-    }
 }
 
 

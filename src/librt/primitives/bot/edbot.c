@@ -31,6 +31,7 @@
 #include "raytrace.h"
 #include "rt/geom.h"
 #include "rt/primitives/bot.h"
+#include "bu/opt.h"
 #include "wdb.h"
 
 #include "../edit_private.h"
@@ -81,7 +82,7 @@
  */
 #define ECMD_BOT_FACE_FUSE	30077
 
-void *
+C_DECL void *
 rt_edit_bot_prim_edit_create(struct rt_edit *UNUSED(s))
 {
     struct rt_bot_edit *b;
@@ -94,7 +95,7 @@ rt_edit_bot_prim_edit_create(struct rt_edit *UNUSED(s))
     return (void *)b;
 }
 
-void
+C_DECL void
 rt_edit_bot_prim_edit_destroy(struct rt_bot_edit *b)
 {
     if (!b)
@@ -107,7 +108,7 @@ rt_edit_bot_prim_edit_destroy(struct rt_bot_edit *b)
     BU_PUT(b, struct rt_bot_edit);
 }
 
-void
+C_DECL void
 rt_edit_bot_prim_edit_reset(struct rt_edit *s)
 {
     struct rt_bot_edit *b = (struct rt_bot_edit *)s->ipe_ptr;
@@ -116,7 +117,7 @@ rt_edit_bot_prim_edit_reset(struct rt_edit *s)
     b->bot_verts[2] = -1;
 }
 
-void
+C_DECL void
 rt_edit_bot_set_edit_mode(struct rt_edit *s, int mode)
 {
     rt_edit_set_edflag(s, mode);
@@ -185,13 +186,13 @@ struct rt_edit_menu_item bot_menu[] = {
     { "", NULL, 0 }
 };
 
-struct rt_edit_menu_item *
+C_DECL struct rt_edit_menu_item *
 rt_edit_bot_menu_item(const struct bn_tol *UNUSED(tol))
 {
     return bot_menu;
 }
 
-void
+C_DECL void
 rt_edit_bot_labels(
 	int *num_lines,
 	point_t *lines,
@@ -267,7 +268,7 @@ rt_edit_bot_labels(
 
 }
 
-const char *
+C_DECL const char *
 rt_edit_bot_keypoint(
 	point_t *pt,
 	const char *keystr,
@@ -279,7 +280,7 @@ rt_edit_bot_keypoint(
     struct rt_db_internal *ip = &s->es_int;
     const char *strp = OBJ[ip->idb_type].ft_keypoint(pt, keystr, mat, ip, tol);
     // If we're editing, use that position instead
-    if (b->bot_verts[0] > -1) {
+    if (b && b->bot_verts[0] > -1) {
 	point_t mpt = VINIT_ZERO;
 	struct rt_bot_internal *bot = (struct rt_bot_internal *)ip->idb_ptr;
 	RT_BOT_CK_MAGIC(bot);
@@ -297,12 +298,18 @@ ecmd_bot_mode(struct rt_edit *s)
     RT_BOT_CK_MAGIC(bot);
     int old_mode = bot->mode;
 
-    // Set bot->mode using the callback
-    bu_clbk_t f = NULL;
-    void *d = NULL;
-    rt_edit_map_clbk_get(&f, &d, s->m, ECMD_BOT_MODE, BU_CLBK_DURING);
-    if (f)
-	(*f)(0, NULL, d, s);
+    if (s->e_inpara >= 1) {
+	/* Descriptor path: set mode directly from e_para[0] */
+	bot->mode = (unsigned char)s->e_para[0];
+	s->e_inpara = 0;
+    } else {
+	/* Interactive path: use callback */
+	bu_clbk_t f = NULL;
+	void *d = NULL;
+	rt_edit_map_clbk_get(&f, &d, s->m, ECMD_BOT_MODE, BU_CLBK_DURING);
+	if (f)
+	    (*f)(0, NULL, d, s);
+    }
 
     if (bot->mode == RT_BOT_PLATE || bot->mode == RT_BOT_PLATE_NOCOS) {
 	if (old_mode != RT_BOT_PLATE && old_mode != RT_BOT_PLATE_NOCOS) {
@@ -324,12 +331,21 @@ ecmd_bot_mode(struct rt_edit *s)
 void
 ecmd_bot_orient(struct rt_edit *s)
 {
-    // Set bot->orientation using the callback
-    bu_clbk_t f = NULL;
-    void *d = NULL;
-    rt_edit_map_clbk_get(&f, &d, s->m, ECMD_BOT_ORIENT, BU_CLBK_DURING);
-    if (f)
-	(*f)(0, NULL, d, s);
+    struct rt_bot_internal *bot = (struct rt_bot_internal *)s->es_int.idb_ptr;
+    RT_BOT_CK_MAGIC(bot);
+
+    if (s->e_inpara >= 1) {
+	/* Descriptor path: set orientation directly from e_para[0] */
+	bot->orientation = (unsigned char)s->e_para[0];
+	s->e_inpara = 0;
+    } else {
+	/* Interactive path: use callback */
+	bu_clbk_t f = NULL;
+	void *d = NULL;
+	rt_edit_map_clbk_get(&f, &d, s->m, ECMD_BOT_ORIENT, BU_CLBK_DURING);
+	if (f)
+	    (*f)(0, NULL, d, s);
+    }
 }
 
 int
@@ -364,23 +380,58 @@ ecmd_bot_thick(struct rt_edit *s)
 void
 ecmd_bot_flags(struct rt_edit *s)
 {
-    // Set bot->thickness array using the callback
-    bu_clbk_t f = NULL;
-    void *d = NULL;
-    rt_edit_map_clbk_get(&f, &d, s->m, ECMD_BOT_FLAGS, BU_CLBK_DURING);
-    if (f)
-	(*f)(0, NULL, d, s);
+    struct rt_bot_internal *bot = (struct rt_bot_internal *)s->es_int.idb_ptr;
+    RT_BOT_CK_MAGIC(bot);
+
+    if (s->e_inpara >= 1) {
+	/* Descriptor path: set flags directly from e_para[0] */
+	bot->bot_flags = (unsigned char)s->e_para[0];
+	s->e_inpara = 0;
+    } else {
+	/* Interactive path: use callback */
+	bu_clbk_t f = NULL;
+	void *d = NULL;
+	rt_edit_map_clbk_get(&f, &d, s->m, ECMD_BOT_FLAGS, BU_CLBK_DURING);
+	if (f)
+	    (*f)(0, NULL, d, s);
+    }
 }
 
 void
 ecmd_bot_fmode(struct rt_edit *s)
 {
-    // Set bot->face_mode using the callback
-    bu_clbk_t f = NULL;
-    void *d = NULL;
-    rt_edit_map_clbk_get(&f, &d, s->m, ECMD_BOT_FMODE, BU_CLBK_DURING);
-    if (f)
-	(*f)(0, NULL, d, s);
+    struct rt_bot_edit *b = (struct rt_bot_edit *)s->ipe_ptr;
+    struct rt_bot_internal *bot = (struct rt_bot_internal *)s->es_int.idb_ptr;
+    RT_BOT_CK_MAGIC(bot);
+
+    if (s->e_inpara >= 1) {
+	/* Descriptor path: set face mode bit for selected face from e_para[0] */
+	int face_no = -1;
+	if (b->bot_verts[0] >= 0 && b->bot_verts[1] >= 0 && b->bot_verts[2] >= 0) {
+	    for (size_t i = 0; i < bot->num_faces; i++) {
+		if (bot->faces[i*3] == b->bot_verts[0] &&
+			bot->faces[i*3+1] == b->bot_verts[1] &&
+			bot->faces[i*3+2] == b->bot_verts[2]) {
+		    face_no = (int)i;
+		    break;
+		}
+	    }
+	}
+	if (face_no >= 0 && bot->face_mode) {
+	    if ((int)s->e_para[0])
+		BU_BITSET(bot->face_mode, face_no);
+	    else
+		BU_BITCLR(bot->face_mode, face_no);
+	}
+	s->e_inpara = 0;
+    } else {
+	/* Interactive path: use callback */
+	bu_clbk_t f = NULL;
+	void *d = NULL;
+	rt_edit_map_clbk_get(&f, &d, s->m, ECMD_BOT_FMODE, BU_CLBK_DURING);
+	if (f)
+	    (*f)(0, NULL, d, s);
+    }
 }
 
 int
@@ -1029,7 +1080,7 @@ ecmd_bot_pickt(struct rt_edit *s, const vect_t mousevec)
     }
 }
 
-int
+C_DECL int
 rt_edit_bot_edit(struct rt_edit *s)
 {
     struct rt_bot_edit *b = (struct rt_bot_edit *)s->ipe_ptr;
@@ -1092,8 +1143,31 @@ rt_edit_bot_edit(struct rt_edit *s)
 	    ecmd_bot_movet(s);
 	    break;
 	case ECMD_BOT_PICKV:
+	    /* Descriptor path: select vertex by index from e_para[0] */
+	    if (s->e_inpara >= 1) {
+		b->bot_verts[0] = (int)s->e_para[0];
+		b->bot_verts[1] = -1;
+		b->bot_verts[2] = -1;
+		s->e_inpara = 0;
+	    }
+	    break;
 	case ECMD_BOT_PICKE:
+	    /* Descriptor path: select edge by vertex pair from e_para[0..1] */
+	    if (s->e_inpara >= 2) {
+		b->bot_verts[0] = (int)s->e_para[0];
+		b->bot_verts[1] = (int)s->e_para[1];
+		b->bot_verts[2] = -1;
+		s->e_inpara = 0;
+	    }
+	    break;
 	case ECMD_BOT_PICKT:
+	    /* Descriptor path: select face by vertex triple from e_para[0..2] */
+	    if (s->e_inpara >= 3) {
+		b->bot_verts[0] = (int)s->e_para[0];
+		b->bot_verts[1] = (int)s->e_para[1];
+		b->bot_verts[2] = (int)s->e_para[2];
+		s->e_inpara = 0;
+	    }
 	    break;
 	default:
 	    return edit_generic(s);
@@ -1102,7 +1176,7 @@ rt_edit_bot_edit(struct rt_edit *s)
     return 0;
 }
 
-int
+C_DECL int
 rt_edit_bot_edit_xy(
 	struct rt_edit *s,
 	const vect_t mousevec
@@ -1156,9 +1230,308 @@ rt_edit_bot_edit_xy(
     return 0;
 }
 
+/* ================================================================== *
+ * Descriptor                                                          *
+ * ================================================================== */
+
+/* Enum tables for MODE and ORIENT */
+static const char *bot_mode_labels[] = {
+    "surface", "solid", "plate", "plate_nocos", NULL
+};
+static const int bot_mode_ids[] = {
+    RT_BOT_SURFACE, RT_BOT_SOLID, RT_BOT_PLATE, RT_BOT_PLATE_NOCOS
+};
+
+static const char *bot_orient_labels[] = {
+    "unoriented", "ccw", "cw", NULL
+};
+static const int bot_orient_ids[] = {
+    RT_BOT_UNORIENTED, RT_BOT_CCW, RT_BOT_CW
+};
+
+static const struct rt_edit_param_desc bot_pickv_params[] = {
+    { "vertex_index", "Vertex Index", RT_EDIT_PARAM_INTEGER, 0,
+      0.0, RT_EDIT_PARAM_NO_LIMIT, "count", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc bot_picke_params[] = {
+    { "v1", "Vertex 1", RT_EDIT_PARAM_INTEGER, 0,
+      0.0, RT_EDIT_PARAM_NO_LIMIT, "count", 0, NULL, NULL, NULL },
+    { "v2", "Vertex 2", RT_EDIT_PARAM_INTEGER, 1,
+      0.0, RT_EDIT_PARAM_NO_LIMIT, "count", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc bot_pickt_params[] = {
+    { "v1", "Vertex 1", RT_EDIT_PARAM_INTEGER, 0,
+      0.0, RT_EDIT_PARAM_NO_LIMIT, "count", 0, NULL, NULL, NULL },
+    { "v2", "Vertex 2", RT_EDIT_PARAM_INTEGER, 1,
+      0.0, RT_EDIT_PARAM_NO_LIMIT, "count", 0, NULL, NULL, NULL },
+    { "v3", "Vertex 3", RT_EDIT_PARAM_INTEGER, 2,
+      0.0, RT_EDIT_PARAM_NO_LIMIT, "count", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc bot_point_params[] = {
+    { "pos", "Position", RT_EDIT_PARAM_POINT, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "length",
+      0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc bot_delta_params[] = {
+    { "delta", "Delta (dx dy dz + vertex indices)", RT_EDIT_PARAM_VECTOR, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "length",
+      0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc bot_mode_params[] = {
+    { "mode", "Mode", RT_EDIT_PARAM_ENUM, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "",
+      4, bot_mode_labels, bot_mode_ids, NULL }
+};
+
+static const struct rt_edit_param_desc bot_orient_params[] = {
+    { "orientation", "Orientation", RT_EDIT_PARAM_ENUM, 0,
+      RT_EDIT_PARAM_NO_LIMIT, RT_EDIT_PARAM_NO_LIMIT, "",
+      3, bot_orient_labels, bot_orient_ids, NULL }
+};
+
+static const struct rt_edit_param_desc bot_thick_params[] = {
+    { "thickness", "Face Thickness", RT_EDIT_PARAM_SCALAR, 0,
+      0.0, RT_EDIT_PARAM_NO_LIMIT, "length", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc bot_fmode_params[] = {
+    { "flag", "Face Mode Flag (0=append, 1=whole)", RT_EDIT_PARAM_INTEGER, 0,
+      0.0, 1.0, "", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_param_desc bot_flags_params[] = {
+    { "flags", "Bot Flags", RT_EDIT_PARAM_INTEGER, 0,
+      0.0, RT_EDIT_PARAM_NO_LIMIT, "", 0, NULL, NULL, NULL }
+};
+
+static const struct rt_edit_cmd_desc bot_cmds[] = {
+    { ECMD_BOT_PICKV,       "Select Vertex",       "selection", 1, bot_pickv_params,  0, 10, NULL },
+    { ECMD_BOT_PICKE,       "Select Edge",         "selection", 2, bot_picke_params,  0, 20, NULL },
+    { ECMD_BOT_PICKT,       "Select Face",         "selection", 3, bot_pickt_params,  0, 30, NULL },
+    { ECMD_BOT_MOVEV,       "Move Vertex",         "movement",  1, bot_point_params,  1, 40, NULL },
+    { ECMD_BOT_MOVEE,       "Move Edge",           "movement",  1, bot_point_params,  1, 50, NULL },
+    { ECMD_BOT_MOVET,       "Move Face",           "movement",  1, bot_point_params,  1, 60, NULL },
+    { ECMD_BOT_MOVEV_LIST,  "Move Vertex List",    "movement",  1, bot_delta_params,  1, 70, NULL },
+    { ECMD_BOT_ESPLIT,      "Split Edge",          "topology",  0, NULL,              0, 80, NULL },
+    { ECMD_BOT_FSPLIT,      "Split Face",          "topology",  0, NULL,              0, 90, NULL },
+    { ECMD_BOT_FDEL,        "Delete Face",         "topology",  0, NULL,              0, 100, NULL },
+    { ECMD_BOT_VERTEX_FUSE, "Fuse Vertices",       "topology",  0, NULL,              0, 110, NULL },
+    { ECMD_BOT_FACE_FUSE,   "Fuse Faces",          "topology",  0, NULL,              0, 120, NULL },
+    { ECMD_BOT_MODE,        "Set Mode",            "properties",1, bot_mode_params,   1, 130, NULL },
+    { ECMD_BOT_ORIENT,      "Set Orientation",     "properties",1, bot_orient_params, 1, 140, NULL },
+    { ECMD_BOT_THICK,       "Set Face Thickness",  "properties",1, bot_thick_params,  1, 150, NULL },
+    { ECMD_BOT_FMODE,       "Set Face Mode",       "properties",1, bot_fmode_params,  1, 160, NULL },
+    { ECMD_BOT_FLAGS,       "Set Flags",           "properties",1, bot_flags_params,  1, 170, NULL }
+};
+
+static const struct rt_edit_prim_desc bot_prim_desc = {
+    "bot", "BOT", 17, bot_cmds,
+    0,                    /* nopt         */
+    NULL                  /* opts         */
+};
+
+C_DECL const struct rt_edit_prim_desc *
+rt_edit_bot_edit_desc(void)
+{
+    return &bot_prim_desc;
+}
+
+
+C_DECL int
+rt_edit_bot_get_params(struct rt_edit *s, int cmd_id, fastf_t *vals)
+{
+    if (!s || !vals) return 0;
+
+    struct rt_bot_edit *b = (struct rt_bot_edit *)s->ipe_ptr;
+    struct rt_bot_internal *bot =
+	(struct rt_bot_internal *)s->es_int.idb_ptr;
+    RT_BOT_CK_MAGIC(bot);
+
+    switch (cmd_id) {
+	case ECMD_BOT_PICKV:
+	    vals[0] = (fastf_t)b->bot_verts[0];
+	    return 1;
+
+	case ECMD_BOT_PICKE:
+	    vals[0] = (fastf_t)b->bot_verts[0];
+	    vals[1] = (fastf_t)b->bot_verts[1];
+	    return 2;
+
+	case ECMD_BOT_PICKT:
+	    vals[0] = (fastf_t)b->bot_verts[0];
+	    vals[1] = (fastf_t)b->bot_verts[1];
+	    vals[2] = (fastf_t)b->bot_verts[2];
+	    return 3;
+
+	case ECMD_BOT_MOVEV:
+	    if (b->bot_verts[0] < 0 ||
+		    (size_t)b->bot_verts[0] >= bot->num_vertices)
+		return 0;
+	    VSCALE(vals, &bot->vertices[b->bot_verts[0] * 3], s->base2local);
+	    return 3;
+
+	case ECMD_BOT_MOVEE:
+	    if (b->bot_verts[0] < 0 || b->bot_verts[1] < 0 ||
+		    (size_t)b->bot_verts[0] >= bot->num_vertices ||
+		    (size_t)b->bot_verts[1] >= bot->num_vertices)
+		return 0;
+	    /* Return midpoint of the edge */
+	    VADD2SCALE(vals,
+		    &bot->vertices[b->bot_verts[0] * 3],
+		    &bot->vertices[b->bot_verts[1] * 3],
+		    0.5 * s->base2local);
+	    return 3;
+
+	case ECMD_BOT_MOVET:
+	    if (b->bot_verts[0] < 0 || b->bot_verts[1] < 0 || b->bot_verts[2] < 0 ||
+		    (size_t)b->bot_verts[0] >= bot->num_vertices ||
+		    (size_t)b->bot_verts[1] >= bot->num_vertices ||
+		    (size_t)b->bot_verts[2] >= bot->num_vertices)
+		return 0;
+	    /* Return centroid of the face */
+	    VADD3(vals,
+		    &bot->vertices[b->bot_verts[0] * 3],
+		    &bot->vertices[b->bot_verts[1] * 3],
+		    &bot->vertices[b->bot_verts[2] * 3]);
+	    VSCALE(vals, vals, s->base2local / 3.0);
+	    return 3;
+
+	case ECMD_BOT_MODE:
+	    vals[0] = (fastf_t)bot->mode;
+	    return 1;
+
+	case ECMD_BOT_ORIENT:
+	    vals[0] = (fastf_t)bot->orientation;
+	    return 1;
+
+	case ECMD_BOT_THICK: {
+	    /* Return thickness of the selected face, or 0 if no face selected */
+	    if (!bot->thickness || b->bot_verts[0] < 0 || b->bot_verts[1] < 0 ||
+		    b->bot_verts[2] < 0) {
+		vals[0] = 0.0;
+		return 1;
+	    }
+	    for (size_t fi = 0; fi < bot->num_faces; fi++) {
+		if (bot->faces[fi*3] == b->bot_verts[0] &&
+			bot->faces[fi*3+1] == b->bot_verts[1] &&
+			bot->faces[fi*3+2] == b->bot_verts[2]) {
+		    vals[0] = bot->thickness[fi] * s->base2local;
+		    return 1;
+		}
+	    }
+	    vals[0] = 0.0;
+	    return 1;
+	}
+
+	case ECMD_BOT_FMODE: {
+	    if (!bot->face_mode || b->bot_verts[0] < 0 || b->bot_verts[1] < 0 ||
+		    b->bot_verts[2] < 0) {
+		vals[0] = 0.0;
+		return 1;
+	    }
+	    for (size_t fi = 0; fi < bot->num_faces; fi++) {
+		if (bot->faces[fi*3] == b->bot_verts[0] &&
+			bot->faces[fi*3+1] == b->bot_verts[1] &&
+			bot->faces[fi*3+2] == b->bot_verts[2]) {
+		    vals[0] = BU_BITTEST(bot->face_mode, fi) ? 1.0 : 0.0;
+		    return 1;
+		}
+	    }
+	    vals[0] = 0.0;
+	    return 1;
+	}
+
+	case ECMD_BOT_FLAGS:
+	    vals[0] = (fastf_t)bot->bot_flags;
+	    return 1;
+
+	default:
+	    return 0;
+    }
+}
+
+int
+rt_edit_bot_repair(struct bu_vls *log_str, struct rt_db_internal *ip, const struct bn_tol *tol, int argc, const char **argv)
+{
+    struct rt_bot_internal *bot;
+    struct rt_bot_repair_info settings = RT_BOT_REPAIR_INFO_INIT;
+    int print_help = 0;
+    (void)tol;
+    
+    RT_CK_DB_INTERNAL(ip);
+    bot = (struct rt_bot_internal *)ip->idb_ptr;
+    RT_BOT_CK_MAGIC(bot);
+
+    if (bot->mode != RT_BOT_SOLID) {
+        if (log_str) bu_vls_printf(log_str, "{\"status\":\"error\",\"message\":\"BoT must be solid for repair\"}");
+        return -1;
+    }
+
+    struct bu_opt_desc d[5];
+    int options_json = 0;
+    BU_OPT(d[0], "h",  "help",                "",             NULL,                     &print_help,  "Print help");
+    BU_OPT(d[1], "p",  "max-hole-percent",   "#",   bu_opt_fastf_t, &settings.max_hole_area_percent,  "Maximum hole area to repair (percentage of mesh surface area)");
+    BU_OPT(d[2], "a",  "max-hole-area",     " #",   bu_opt_fastf_t,         &settings.max_hole_area,  "Maximum hole area to repair in mm (overrides -p option)");
+    BU_OPT(d[3], "",   "options-json",        "",             NULL,                   &options_json,  "Return JSON of supported options");
+    BU_OPT_NULL(d[4]);
+
+    if (argc > 0 && argv) {
+        bu_opt_parse(NULL, argc, argv, d);
+    }
+
+    if (options_json) {
+        if (log_str) {
+            bu_vls_printf(log_str, "{\"options\":[");
+            bu_vls_printf(log_str, "{\"name\":\"max-hole-percent\",\"type\":\"float\",\"description\":\"Maximum hole area to repair (percentage of mesh surface area)\"},");
+            bu_vls_printf(log_str, "{\"name\":\"max-hole-area\",\"type\":\"float\",\"description\":\"Maximum hole area to repair in mm (overrides max-hole-percent)\"}");
+            bu_vls_printf(log_str, "]}");
+        }
+        return 1;
+    }
+
+    if (print_help) {
+        if (log_str) {
+            char *option_help = bu_opt_describe(d, NULL);
+            bu_vls_printf(log_str, "{\"status\":\"help\",\"message\":\"Options:\\n%s\"}", option_help ? option_help : "");
+            if (option_help) bu_free(option_help, "help str");
+        }
+        return -1;
+    }
+
+    if (NEAR_EQUAL(settings.max_hole_area_percent, 100, VUNITIZE_TOL)) {
+        settings.max_hole_area_percent = 0.0;
+    }
+
+    struct rt_bot_internal *obot = NULL;
+    int rep_ret = rt_bot_repair(&obot, bot, &settings);
+
+    if (rep_ret < 0) {
+        if (log_str) bu_vls_printf(log_str, "{\"status\":\"error\",\"message\":\"Unable to repair BoT\"}");
+        return -1;
+    }
+
+    if (rep_ret == 1 || obot == bot || !obot) {
+        if (log_str) bu_vls_printf(log_str, "{\"status\":\"success\",\"message\":\"BoT is already manifold, no repair needed.\"}");
+        return 0; 
+    }
+
+    /* Free the old bot internals, assign the new one */
+    ip->idb_meth->ft_ifree(ip);
+    ip->idb_ptr = (void *)obot;
+
+    if (log_str) bu_vls_printf(log_str, "{\"status\":\"success\",\"message\":\"Successfully repaired BoT\"}");
+
+    return 0;
+}
+
 /*
  * Local Variables:
- * mode: C
+ * mode: C++
  * tab-width: 8
  * indent-tabs-mode: t
  * c-file-style: "stroustrup"

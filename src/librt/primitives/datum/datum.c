@@ -47,7 +47,7 @@
 #include "./datum.h"
 
 /* maximum number of values a datum may have (positioned plane case) */
-#define MAX_VALS (ELEMENTS_PER_POINT + ELEMENTS_PER_VECT + 1 ) /* for w */
+#define MAX_VALS (ELEMENTS_PER_POINT + ELEMENTS_PER_VECT + 1) /* for w */
 
 
 /**
@@ -63,7 +63,7 @@
  * A struct datum_specific is created, and its address is stored in
  * stp->st_specific for use by datum_shot().
  */
-int
+C_DECL int
 rt_datum_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 {
     struct rt_datum_internal *datum_ip;
@@ -91,7 +91,7 @@ rt_datum_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 }
 
 
-void
+C_DECL void
 rt_datum_print(const struct soltab *stp)
 {
     /* unnecessary callback */
@@ -100,7 +100,7 @@ rt_datum_print(const struct soltab *stp)
 }
 
 
-int
+C_DECL int
 rt_datum_shot(struct soltab *UNUSED(stp), struct xray *UNUSED(rp), struct application *UNUSED(ap), struct seg *UNUSED(seghead))
 {
     /* these are not solid geometry, so always a miss */
@@ -108,28 +108,44 @@ rt_datum_shot(struct soltab *UNUSED(stp), struct xray *UNUSED(rp), struct applic
 }
 
 
-void
+/**
+ * Vectorized rt_datum_shot(): datums are not solid geometry, so every
+ * ray in the batch misses.
+ */
+C_DECL void
+rt_datum_vshot(struct soltab **stp, struct xray **UNUSED(rp), struct seg *segp, int n, struct application *ap)
+{
+    int i;
+    if (ap) RT_CK_APPLICATION(ap);
+    for (i = 0; i < n; i++) {
+	if (stp[i] == 0) continue;		/* skip this ray */
+	segp[i].seg_stp = (struct soltab *)0;	/* always MISS */
+    }
+}
+
+
+C_DECL void
 rt_datum_norm(struct hit *UNUSED(hitp), struct soltab *UNUSED(stp), struct xray *UNUSED(rp))
 {
     return;
 }
 
 
-void
+C_DECL void
 rt_datum_curve(struct curvature *UNUSED(cvp), struct hit *UNUSED(hitp), struct soltab *UNUSED(stp))
 {
     return;
 }
 
 
-void
+C_DECL void
 rt_datum_uv(struct application *UNUSED(ap), struct soltab *UNUSED(stp), struct hit *UNUSED(hitp), struct uvcoord *UNUSED(uvp))
 {
     return;
 }
 
 
-void
+C_DECL void
 rt_datum_free(struct soltab *stp)
 {
     struct datum_specific *datum;
@@ -143,7 +159,7 @@ rt_datum_free(struct soltab *stp)
 }
 
 
-int
+C_DECL int
 rt_datum_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_tess_tol *UNUSED(ttol), const struct bn_tol *UNUSED(tol), const struct bview *UNUSED(info))
 {
     struct rt_datum_internal *datum_ip;
@@ -262,7 +278,7 @@ rt_datum_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_
  * -1 failure
  * 0 OK.  *r points to nmgregion that holds this tessellation.
  */
-int
+C_DECL int
 rt_datum_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, const struct bg_tess_tol *UNUSED(ttol), const struct bn_tol *UNUSED(tol))
 {
     struct rt_datum_internal *datum_ip;
@@ -285,6 +301,7 @@ datum_pack_double(unsigned char *buf, unsigned char *data, size_t count)
     return buf;
 }
 
+
 static unsigned char *
 datum_unpack_double(unsigned char *buf, unsigned char *data, size_t count)
 {
@@ -301,7 +318,7 @@ datum_unpack_double(unsigned char *buf, unsigned char *data, size_t count)
  *
  * Apply the transformation to mm units as well.
  */
-int
+C_DECL int
 rt_datum_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_datum_internal *datum_ip;
@@ -368,7 +385,8 @@ rt_datum_export5(struct bu_external *ep, const struct rt_db_internal *ip, double
     return 0;
 }
 
-int
+
+C_DECL int
 rt_datum_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !mat)
@@ -406,7 +424,7 @@ rt_datum_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_int
  *
  * Apply modeling transformations as well.
  */
-int
+C_DECL int
 rt_datum_import5(struct rt_db_internal *ip, const struct bu_external *ep, const mat_t mat, const struct db_i *dbip)
 {
     struct rt_datum_internal *first = NULL;
@@ -465,12 +483,94 @@ rt_datum_import5(struct rt_db_internal *ip, const struct bu_external *ep, const 
 }
 
 
+C_DECL int
+rt_datum_make(const struct rt_functab* ftp, struct rt_db_internal* intern, const char* UNUSED(variant), const point_t origin, double UNUSED(scale))
+{
+    struct rt_datum_internal *datum_ip;
+
+    intern->idb_major_type = DB5_MAJORTYPE_BRLCAD;
+    intern->idb_type = ID_DATUM;
+    BU_ASSERT(&OBJ[intern->idb_type] == ftp);
+    intern->idb_meth = ftp;
+
+    /* Set a default color for datum objects */
+    bu_avs_add(&intern->idb_avs, "color", "255/255/0");
+
+    BU_ALLOC(intern->idb_ptr, struct rt_datum_internal);
+    datum_ip = (struct rt_datum_internal *)intern->idb_ptr;
+    datum_ip->magic = RT_DATUM_INTERNAL_MAGIC;
+
+    /* center point */
+    VSET(datum_ip->pnt, origin[X], origin[Y], origin[Z]);
+
+    /* just a point */
+    VSETALL(datum_ip->dir, 0.0);
+    datum_ip->w = 0.0;
+    datum_ip->next = NULL;
+
+#if 0
+    /* Historically 'make' would create a full demo coordinate system datum: 7 
+     * datums chained (one center point, three axis vectors, and three planes)
+     * This isn't really in the spirit of a "default" make, but is still a good
+     * example
+     */
+    struct rt_datum_internal *next_ip;
+
+    /* X-axis */
+    BU_ALLOC(next_ip, struct rt_datum_internal);
+    next_ip->magic = RT_DATUM_INTERNAL_MAGIC;
+    VSET(next_ip->pnt, origin[X], origin[Y], origin[Z]);
+    VSET(next_ip->dir, 1.0, 0.0, 0.0);
+    datum_ip->next = next_ip;
+
+    /* Y-axis */
+    BU_ALLOC(next_ip, struct rt_datum_internal);
+    next_ip->magic = RT_DATUM_INTERNAL_MAGIC;
+    VSET(next_ip->pnt, origin[X], origin[Y], origin[Z]);
+    VSET(next_ip->dir, 0.0, 1.0, 0.0);
+    datum_ip->next->next = next_ip;
+
+    /* Z-axis */
+    BU_ALLOC(next_ip, struct rt_datum_internal);
+    next_ip->magic = RT_DATUM_INTERNAL_MAGIC;
+    VSET(next_ip->pnt, origin[X], origin[Y], origin[Z]);
+    VSET(next_ip->dir, 0.0, 0.0, 1.0);
+    datum_ip->next->next->next = next_ip;
+
+    /* X-plane */
+    BU_ALLOC(next_ip, struct rt_datum_internal);
+    next_ip->magic = RT_DATUM_INTERNAL_MAGIC;
+    VSET(next_ip->pnt, origin[X], origin[Y], origin[Z]);
+    VSET(next_ip->dir, 1.0, 0.0, 0.0);
+    next_ip->w = 1.0;
+    datum_ip->next->next->next->next = next_ip;
+
+    /* Y-plane */
+    BU_ALLOC(next_ip, struct rt_datum_internal);
+    next_ip->magic = RT_DATUM_INTERNAL_MAGIC;
+    VSET(next_ip->pnt, origin[X], origin[Y], origin[Z]);
+    VSET(next_ip->dir, 0.0, 1.0, 0.0);
+    next_ip->w = 1.0;
+    datum_ip->next->next->next->next->next = next_ip;
+
+    /* Z-plane */
+    BU_ALLOC(next_ip, struct rt_datum_internal);
+    next_ip->magic = RT_DATUM_INTERNAL_MAGIC;
+    VSET(next_ip->pnt, origin[X], origin[Y], origin[Z]);
+    VSET(next_ip->dir, 0.0, 0.0, 1.0);
+    next_ip->w = 1.0;
+    datum_ip->next->next->next->next->next->next = next_ip;
+#endif
+
+    return BRLCAD_OK;
+}
+
 /**
  * Make human-readable formatted presentation of this solid.  First
  * line describes type of solid.  Additional lines are indented one
  * tab, and give parameter values.
  */
-int
+C_DECL int
 rt_datum_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local)
 {
     struct rt_datum_internal *datum_ip = (struct rt_datum_internal *)ip->idb_ptr;
@@ -523,7 +623,7 @@ rt_datum_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbo
  * Free the storage associated with the rt_db_internal version of this
  * solid.
  */
-void
+C_DECL void
 rt_datum_ifree(struct rt_db_internal *ip)
 {
     struct rt_datum_internal *datum_ip;
@@ -544,7 +644,8 @@ rt_datum_ifree(struct rt_db_internal *ip)
     ip->idb_ptr = NULL;	/* sanity */
 }
 
-const char *
+
+C_DECL const char *
 rt_datum_keypoint(point_t *pt, const char *keystr, const mat_t mat, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     if (!pt || !ip)
@@ -570,6 +671,151 @@ datum_kpt_end:
     MAT4X3PNT(*pt, mat, mpt);
 
     return k;
+}
+
+
+C_DECL int
+rt_datum_get(struct bu_vls *logstr, const struct rt_db_internal *intern, const char *attr)
+{
+    struct rt_datum_internal *datum;
+
+    RT_CK_DB_INTERNAL(intern);
+    datum = (struct rt_datum_internal *)intern->idb_ptr;
+    RT_DATUM_CK_MAGIC(datum);
+
+    if (attr) {
+        bu_vls_printf(logstr, "datum has no attribute '%s'", attr);
+        return BRLCAD_ERROR;
+    }
+
+    bu_vls_strcpy(logstr, "datum data {");
+    while (datum) {
+        if (!ZERO(datum->w)) {
+            bu_vls_printf(logstr, " {plane %.25G %.25G %.25G %.25G %.25G %.25G %.25G}",
+                          V3ARGS(datum->pnt), V3ARGS(datum->dir), datum->w);
+        } else if (MAGNITUDE(datum->dir) > 0.0 && ZERO(datum->w)) {
+            bu_vls_printf(logstr, " {line %.25G %.25G %.25G %.25G %.25G %.25G}",
+                          V3ARGS(datum->pnt), V3ARGS(datum->dir));
+        } else {
+            bu_vls_printf(logstr, " {point %.25G %.25G %.25G}",
+                          V3ARGS(datum->pnt));
+        }
+        datum = datum->next;
+    }
+    bu_vls_strcat(logstr, "}");
+    return BRLCAD_OK;
+}
+
+
+C_DECL int
+rt_datum_form(struct bu_vls *logstr, const struct rt_functab *ftp)
+{
+    RT_CK_FUNCTAB(ftp);
+    bu_vls_printf(logstr, "data { {point %%f %%f %%f} {line %%f %%f %%f %%f %%f %%f} {plane %%f %%f %%f %%f %%f %%f %%f} ...}");
+    return BRLCAD_OK;
+}
+
+
+C_DECL int
+rt_datum_adjust(struct bu_vls *logstr, struct rt_db_internal *intern, int argc, const char **argv)
+{
+    struct rt_datum_internal *datum;
+    int i;
+
+    RT_CK_DB_INTERNAL(intern);
+    datum = (struct rt_datum_internal *)intern->idb_ptr;
+    RT_DATUM_CK_MAGIC(datum);
+
+    for (i = 0; i < argc; i += 2) {
+        if (BU_STR_EQUAL(argv[i], "data")) {
+            const char **list_argv;
+            int list_argc;
+            struct rt_datum_internal *head = NULL, *tail = NULL;
+            int j;
+
+            if (i + 1 >= argc) {
+                bu_vls_printf(logstr, "missing value for 'data' attribute");
+                return BRLCAD_ERROR;
+            }
+
+            if (bu_argv_from_tcl_list(argv[i+1], &list_argc, (const char ***)&list_argv) != 0) {
+                bu_vls_printf(logstr, "invalid data list");
+                return BRLCAD_ERROR;
+            }
+
+            for (j = 0; j < list_argc; j++) {
+                const char **elem_argv;
+                int elem_argc;
+                if (bu_argv_from_tcl_list(list_argv[j], &elem_argc, (const char ***)&elem_argv) != 0) {
+                    bu_vls_printf(logstr, "invalid datum element list");
+                    bu_free((char *)list_argv, "list_argv");
+                    return BRLCAD_ERROR;
+                }
+
+                if (elem_argc > 0) {
+                    struct rt_datum_internal *new_datum;
+                    BU_ALLOC(new_datum, struct rt_datum_internal);
+                    new_datum->magic = RT_DATUM_INTERNAL_MAGIC;
+                    new_datum->next = NULL;
+
+                    if (BU_STR_EQUAL(elem_argv[0], "point") && elem_argc == 4) {
+                        new_datum->pnt[X] = atof(elem_argv[1]);
+                        new_datum->pnt[Y] = atof(elem_argv[2]);
+                        new_datum->pnt[Z] = atof(elem_argv[3]);
+                        VSETALL(new_datum->dir, 0.0);
+                        new_datum->w = 0.0;
+                    } else if (BU_STR_EQUAL(elem_argv[0], "line") && elem_argc == 7) {
+                        new_datum->pnt[X] = atof(elem_argv[1]);
+                        new_datum->pnt[Y] = atof(elem_argv[2]);
+                        new_datum->pnt[Z] = atof(elem_argv[3]);
+                        new_datum->dir[X] = atof(elem_argv[4]);
+                        new_datum->dir[Y] = atof(elem_argv[5]);
+                        new_datum->dir[Z] = atof(elem_argv[6]);
+                        new_datum->w = 0.0;
+                    } else if (BU_STR_EQUAL(elem_argv[0], "plane") && elem_argc == 8) {
+                        new_datum->pnt[X] = atof(elem_argv[1]);
+                        new_datum->pnt[Y] = atof(elem_argv[2]);
+                        new_datum->pnt[Z] = atof(elem_argv[3]);
+                        new_datum->dir[X] = atof(elem_argv[4]);
+                        new_datum->dir[Y] = atof(elem_argv[5]);
+                        new_datum->dir[Z] = atof(elem_argv[6]);
+                        new_datum->w = atof(elem_argv[7]);
+                    } else {
+                        bu_vls_printf(logstr, "invalid datum element");
+                        bu_free((char *)elem_argv, "elem_argv");
+                        bu_free((char *)list_argv, "list_argv");
+                        if (head) {
+                            struct rt_db_internal dummy;
+                            dummy.idb_ptr = head;
+                            rt_datum_ifree(&dummy);
+                        }
+                        return BRLCAD_ERROR;
+                    }
+                    if (!head) {
+                        head = new_datum;
+                    } else {
+                        tail->next = new_datum;
+                    }
+                    tail = new_datum;
+                }
+                bu_free((char *)elem_argv, "elem_argv");
+            }
+            bu_free((char *)list_argv, "list_argv");
+
+            if (!head) {
+                bu_vls_printf(logstr, "datum must have at least one element");
+                return BRLCAD_ERROR;
+            }
+
+            rt_datum_ifree(intern);
+            intern->idb_ptr = head;
+        } else {
+            bu_vls_printf(logstr, "unknown attribute '%s'", argv[i]);
+            return BRLCAD_ERROR;
+        }
+    }
+
+    return BRLCAD_OK;
 }
 
 

@@ -34,7 +34,7 @@ endforeach(srcfile ${bn_test_srcs})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../..)
 configure_file(bn_test.c.in "${CMAKE_CURRENT_BINARY_DIR}/bn_test.c" @ONLY)
 distclean("${CMAKE_CURRENT_BINARY_DIR}/bn_test.c")
-brlcad_addexec(bn_test "${CMAKE_CURRENT_BINARY_DIR}/bn_test.c" libbn TEST)
+brlcad_addexec(bn_test "${CMAKE_CURRENT_BINARY_DIR}/bn_test.c" "libbn;${M_LIBRARY}" TEST)
 
 # Housekeeping for included source files
 cmakefiles(${bn_test_srcs})
@@ -42,6 +42,55 @@ validate_style("${bn_test_srcs}" bn_test)
 
 # WIP - needs to become real test
 brlcad_addexec(bn_randsph randsph.c "libbu;libbn" TEST)
+
+# Higher-level public API behavior tests grouped to match libbn's existing
+# per-area test layout.
+set(
+  bn_group_test_srcs
+  test_anim.c
+  test_msr.c
+  test_noise.c
+  test_rand.c
+  test_sobol.c
+  test_str.c
+  test_tabdata.c
+  test_ulp.c
+  test_version.c
+  test_wavelet.c
+)
+
+cmakefiles(${bn_group_test_srcs} test_util.c test_util.h)
+
+foreach(srcfile ${bn_group_test_srcs})
+  get_filename_component(NAME_ROOT ${srcfile} NAME_WE)
+  brlcad_addexec(${NAME_ROOT} "${srcfile};test_util.c" "libbu;libbn;${M_LIBRARY}" TEST)
+endforeach(srcfile ${bn_group_test_srcs})
+
+brlcad_add_test(NAME test_version COMMAND test_version)
+brlcad_add_test(NAME test_str COMMAND test_str)
+brlcad_add_test(NAME test_ulp COMMAND test_ulp)
+brlcad_add_test(NAME test_noise COMMAND test_noise)
+
+brlcad_add_test(NAME test_rand_table COMMAND test_rand table)
+brlcad_add_test(NAME test_rand_randmt COMMAND test_rand randmt)
+brlcad_add_test(NAME test_rand_sphere COMMAND test_rand sphere)
+
+brlcad_add_test(NAME test_msr_uniform COMMAND test_msr uniform)
+brlcad_add_test(NAME test_msr_gaussian COMMAND test_msr gaussian)
+
+brlcad_add_test(NAME test_sobol_skip COMMAND test_sobol skip)
+brlcad_add_test(NAME test_sobol_bounds COMMAND test_sobol bounds)
+brlcad_add_test(NAME test_sobol_sphere COMMAND test_sobol sphere)
+
+brlcad_add_test(NAME test_anim_basic COMMAND test_anim basic)
+brlcad_add_test(NAME test_anim_quat COMMAND test_anim quat)
+brlcad_add_test(NAME test_anim_dirs COMMAND test_anim dirs)
+
+brlcad_add_test(NAME test_wavelet_1d COMMAND test_wavelet 1d)
+brlcad_add_test(NAME test_wavelet_2d COMMAND test_wavelet 2d)
+
+brlcad_add_test(NAME test_tabdata_io COMMAND test_tabdata io)
+brlcad_add_test(NAME test_tabdata_utils COMMAND test_tabdata utils)
 
 # Testing with Eigen
 find_package_eigen(REQUIRED)
@@ -59,8 +108,7 @@ brlcad_add_test(NAME bn_poly_multiply              COMMAND bn_test poly_multiply
 brlcad_add_test(NAME bn_poly_scale                 COMMAND bn_test poly_scale)
 brlcad_add_test(NAME bn_poly_add                   COMMAND bn_test poly_add)
 
-# failure encountered, no output to indicate why (disabled in prep for release)
-# BRLCAD_ADD_TEST(NAME bn_poly_sub                   COMMAND bn_test poly_sub)
+brlcad_add_test(NAME bn_poly_sub                   COMMAND bn_test poly_sub)
 
 brlcad_add_test(NAME bn_poly_synthetic_div               COMMAND bn_test poly_synthetic_div)
 
@@ -966,6 +1014,7 @@ cmakefiles(
 brlcad_add_test(NAME bn_noise_large_coords   COMMAND bn_test noise 1)
 brlcad_add_test(NAME bn_noise_concurrent     COMMAND bn_test noise 2)
 brlcad_add_test(NAME bn_noise_perlin_basic   COMMAND bn_test noise 3)
+brlcad_add_test(NAME bn_noise_concurrent_first_use COMMAND bn_test noise 4)
 
 # Local Variables:
 # tab-width: 8

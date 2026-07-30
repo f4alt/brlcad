@@ -65,8 +65,9 @@
 #include "./ext.h"
 #include "brlcad_ident.h"
 
-
+__BEGIN_DECLS
 extern void application_init(void);
+__END_DECLS
 
 extern const char title[];
 
@@ -82,31 +83,16 @@ struct icv_image *bif = NULL;
 /***** variables shared with worker() ******/
 struct application APP;
 int		report_progress;	/* !0 = user wants progress report */
-extern int	incr_mode;		/* !0 for incremental resolution */
-extern size_t	incr_nlevel;		/* number of levels */
 /***** end variables shared with worker() *****/
 
 
 /***** variables shared with do.c *****/
-extern int	pix_start;		/* pixel to start at */
-extern int	pix_end;		/* pixel to end at */
 size_t		n_malloc;		/* Totals at last check */
 size_t		n_free;
 size_t		n_realloc;
-extern int	matflag;		/* read matrix from stdin */
-extern int	orientflag;		/* 1 means orientation has been set */
-extern int	desiredframe;		/* frame to start at */
-extern int	curframe;		/* current frame number,
-					 * also shared with view.c */
-extern char	*outputfile;		/* name of base of output file */
 /***** end variables shared with do.c *****/
 
 
-extern fastf_t	rt_dist_tol;		/* Value for rti_tol.dist */
-extern fastf_t	rt_perp_tol;		/* Value for rti_tol.perp */
-extern char	*framebuffer;		/* desired framebuffer */
-
-extern struct command_tab rt_do_tab[];
 
 
 void
@@ -245,6 +231,10 @@ int main(int argc, char *argv[])
 {
     int ret = 0;
     int need_fb = 0;
+    int have_tree = 0;
+    int no_tree_input = 0;
+    int saw_cmd = 0;
+    int stdin_is_tty = 0;
     struct rt_i *rtip = NULL;
     const char *title_file = NULL, *title_obj = NULL;	/* name of file and first object */
     char idbuf[2048] = {0};			/* First ID record info */
@@ -265,6 +255,7 @@ int main(int argc, char *argv[])
 
     bu_setlinebuf(stdout);
     bu_setlinebuf(stderr);
+    stdin_is_tty = isatty(fileno(stdin));
 
     /* establish defaults managed by option handling */
     initialize_option_defaults();
@@ -560,7 +551,7 @@ int main(int argc, char *argv[])
 #endif
 
     /* First, see if we're handling old style processing of the -M flag. */
-    if (matflag && !isatty(fileno(stdin))) {
+    if (matflag && !stdin_is_tty) {
 	int oret = old_way(stdin);
 	if (oret < 0) {
 	    bu_log("%s: no objects specified -- raytrace aborted\n", argv[0]);
@@ -573,10 +564,27 @@ int main(int argc, char *argv[])
 	}
     }
 
-    if (objv && !matflag) {
-	int frame_retval;
+    if (!matflag) {
+	if (objv) {
+	    have_tree = def_tree(APP.a_rt_i, &title_obj);
+	} else if (stdin_is_tty) {
+	    have_tree = def_tree(APP.a_rt_i, &title_obj);
+	    no_tree_input = have_tree ? 0 : 1;
+	} else {
+	    int c = fgetc(stdin);
 
-	def_tree(APP.a_rt_i);		/* Load the default trees */
+	    if (c == EOF) {
+		have_tree = def_tree(APP.a_rt_i, &title_obj);
+		no_tree_input = have_tree ? 0 : 1;
+	    } else {
+		if (ungetc(c, stdin) != c)
+		    bu_exit(EXIT_FAILURE, "rt: unable to restore command input stream\n");
+	    }
+	}
+    }
+
+    if (have_tree) {
+	int frame_retval;
 
 	/*
 	 * Initialize application.
@@ -618,6 +626,12 @@ int main(int argc, char *argv[])
 	register char *buf;
 	register int nret;
 
+	if (!matflag && no_tree_input) {
+	    fprintf(stderr, "rt: specify an object on the command line or provide a valid rt command stream on stdin.\n");
+	    ret = 1;
+	    goto rt_cleanup;
+	}
+
 	/*
 	 * Initialize application.
 	 * Note that width & height may not have been set yet,
@@ -641,13 +655,16 @@ int main(int argc, char *argv[])
 	 * called by rt_do_cmd().
 	 */
 
-	if (!matflag && isatty(fileno(stdin))) {
+	if (!matflag && stdin_is_tty) {
 	    fprintf(stderr, "Additional commands needed - cannot complete raytrace\n");
 	    ret = 1;
 	    goto rt_cleanup;
 	}
 
 	while ((buf = rt_read_cmd(stdin)) != (char *)0) {
+	    saw_cmd = 1;
+	    int is_end_cmd = 0;
+	    int is_multiview_cmd = 0;
 	    if (OPTICAL_DEBUG&OPTICAL_DEBUG_PARSE) {
 		fprintf(stderr, "cmd: %s\n", buf);
 	    }
@@ -663,7 +680,9 @@ int main(int argc, char *argv[])
 	     * Postpone fb setup until we're ready to render something
 	     * to avoid backing up stdin's pipe.
 	     */
-	    if (!bu_strncmp(buf, "end", sizeof("end")) || !bu_strncmp(buf, "multiview", sizeof("multiview"))) {
+	    is_end_cmd = !bu_strncmp(buf, "end", sizeof("end"));
+	    is_multiview_cmd = !bu_strncmp(buf, "multiview", sizeof("multiview"));
+	    if (is_end_cmd || is_multiview_cmd) {
 		if (need_fb != 0 && !fbp) {
 		    int fb_status = fb_setup();
 		    if (fb_status) {
@@ -674,8 +693,22 @@ int main(int argc, char *argv[])
 
 	    nret = rt_do_cmd(APP.a_rt_i, buf, rt_do_tab);
 	    bu_free(buf, "rt_read_cmd command buffer");
-	    if (nret < 0)
+	    if (nret < 0) {
+		if ((is_end_cmd || is_multiview_cmd) && APP.a_rt_i &&
+		    BU_LIST_IS_EMPTY(&APP.a_rt_i->HeadRegion) &&
+		    APP.a_rt_i->stats.rti_nrays == 0) {
+		    fprintf(stderr, "rt: no objects were loaded. Specify an object on the command line or provide a valid rt command stream on stdin.\n");
+		}
+		if (!is_multiview_cmd || !APP.a_rt_i || APP.a_rt_i->stats.rti_nrays == 0) {
+		    ret = 1;
+		}
 		break;
+	    }
+	}
+	if (!matflag && !saw_cmd && BU_LIST_IS_EMPTY(&APP.a_rt_i->HeadRegion)) {
+	    fprintf(stderr, "rt: no objects were loaded. Specify an object on the command line or provide a valid rt command stream on stdin.\n");
+	    ret = 1;
+	    goto rt_cleanup;
 	}
 	if (curframe < desiredframe) {
 	    fprintf(stderr,
@@ -708,7 +741,7 @@ rt_cleanup:
     }
 
     /* Release the ray-tracer instance */
-    rt_free_rti(APP.a_rt_i);
+    rt_i_destroy(APP.a_rt_i);
     APP.a_rt_i = NULL;
 
     return ret;

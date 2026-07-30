@@ -28,6 +28,20 @@
 
 #include "./ged_lint.h"
 
+static bool
+arb_check_enabled(const std::map<std::string, std::set<std::string>> &imt, const char *check)
+{
+    if (!imt.size())
+	return true;
+
+    std::map<std::string, std::set<std::string>>::const_iterator a_it = imt.find(std::string("arb"));
+    if (a_it == imt.end())
+	return false;
+
+    return a_it->second.find(std::string(check)) != a_it->second.end();
+}
+
+
 /* Someday, when we have parametric constraint evaluation for parameters for primitives, we can hook
  * that into this logic as well... for now, run various special-case routines that are available to
  * spot various categories of problematic primitives. */
@@ -77,15 +91,49 @@ _ged_invalid_prim_check(lint_data *ldata, struct directory *dp)
 	    {
 		struct rt_arb_internal *arb = (struct rt_arb_internal *)intern.idb_ptr;
 		RT_ARB_CK_MAGIC(arb);
-		fastf_t td = ldata->ftol;
-		fastf_t td_sq = td * td;
-		if (rt_arb_nonstandard_encoding(arb, td_sq)) {
+		struct bn_tol tol = BN_TOL_INIT_TOL;
+		int issues = 0;
+		struct bu_vls arb_log = BU_VLS_INIT_ZERO;
+
+		if (ldata->ftol > 0.0) {
+		    tol.dist = ldata->ftol;
+		    tol.dist_sq = tol.dist * tol.dist;
+		}
+
+		rt_arb_validate(&arb_log, arb, &tol, &issues);
+		if ((issues & RT_ARB_VALIDATE_NONSTANDARD) && arb_check_enabled(imt, "non_standard_ordering")) {
 		    nlohmann::json aerr;
 		    aerr["problem_type"] = "non_standard_ordering";
 		    aerr["object_type"] = "arb";
 		    aerr["object_name"] = dp->d_namep;
+		    aerr["verbose_log"] = std::string(bu_vls_cstr(&arb_log));
 		    ldata->j.push_back(aerr);
 		}
+		if ((issues & RT_ARB_VALIDATE_NONCOPLANAR) && arb_check_enabled(imt, "non_coplanar_face")) {
+		    nlohmann::json aerr;
+		    aerr["problem_type"] = "non_coplanar_face";
+		    aerr["object_type"] = "arb";
+		    aerr["object_name"] = dp->d_namep;
+		    aerr["verbose_log"] = std::string(bu_vls_cstr(&arb_log));
+		    ldata->j.push_back(aerr);
+		}
+		if ((issues & RT_ARB_VALIDATE_CONCAVE) && arb_check_enabled(imt, "concave")) {
+		    nlohmann::json aerr;
+		    aerr["problem_type"] = "concave";
+		    aerr["object_type"] = "arb";
+		    aerr["object_name"] = dp->d_namep;
+		    aerr["verbose_log"] = std::string(bu_vls_cstr(&arb_log));
+		    ldata->j.push_back(aerr);
+		}
+		if ((issues & RT_ARB_VALIDATE_TWISTED) && arb_check_enabled(imt, "twisted")) {
+		    nlohmann::json aerr;
+		    aerr["problem_type"] = "twisted";
+		    aerr["object_type"] = "arb";
+		    aerr["object_name"] = dp->d_namep;
+		    aerr["verbose_log"] = std::string(bu_vls_cstr(&arb_log));
+		    ldata->j.push_back(aerr);
+		}
+		bu_vls_free(&arb_log);
 	    }
 	    break;
 	case DB5_MINORTYPE_BRLCAD_DSP:
@@ -99,6 +147,37 @@ _ged_invalid_prim_check(lint_data *ldata, struct directory *dp)
 	    // TODO - check for zero length dimension vectors.
 	    break;
 	default:
+	    if (OBJ[dp->d_minor_type].ft_validate) {
+		struct bu_vls generic_log = BU_VLS_INIT_ZERO;
+		struct bn_tol tol = BN_TOL_INIT_TOL;
+		if (ldata->ftol > 0.0) {
+		    tol.dist = ldata->ftol;
+		    tol.dist_sq = tol.dist * tol.dist;
+		}
+		int issues = OBJ[dp->d_minor_type].ft_validate(&generic_log, &intern, &tol);
+		if (issues > 0) {
+		    try {
+			nlohmann::json errs = nlohmann::json::parse(bu_vls_cstr(&generic_log));
+			if (errs.is_array()) {
+			    for (auto& err : errs) {
+				if (!err.contains("object_type"))
+				    err["object_type"] = OBJ[dp->d_minor_type].ft_name;
+				if (!err.contains("object_name"))
+				    err["object_name"] = dp->d_namep;
+				ldata->j.push_back(err);
+			    }
+			}
+		    } catch (...) {
+			nlohmann::json berr;
+			berr["problem_type"] = "invalid_shape";
+			berr["object_type"] = OBJ[dp->d_minor_type].ft_name;
+			berr["object_name"] = dp->d_namep;
+			berr["verbose_log"] = std::string(bu_vls_cstr(&generic_log));
+			ldata->j.push_back(berr);
+		    }
+		}
+		bu_vls_free(&generic_log);
+	    }
 	    break;
     }
 

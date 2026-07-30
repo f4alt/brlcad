@@ -125,7 +125,7 @@
 #include "../../librt_private.h"
 
 
-const struct bu_structparse rt_hrt_parse[] = {
+EXTERNCPP const struct bu_structparse rt_hrt_parse[] = {
     { "%f", 3, "V", bu_offsetofarray(struct rt_hrt_internal, v, fastf_t, X), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
     { "%f", 3, "X", bu_offsetofarray(struct rt_hrt_internal, xdir, fastf_t, X), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
     { "%f", 3, "Y", bu_offsetofarray(struct rt_hrt_internal, ydir, fastf_t, X), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
@@ -175,7 +175,7 @@ clt_hrt_pack(struct bu_pool *pool, struct soltab *stp)
 /**
  * Compute the bounding RPP for a heart.
  */
-int
+C_DECL int
 rt_hrt_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct bn_tol *UNUSED(tol))
 {
     struct rt_hrt_internal *hip;
@@ -247,7 +247,7 @@ rt_hrt_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct 
  * A struct hrt_specific is created, and its address is stored in
  * stp->st_specific for use by rt_hrt_shot().
  */
-int
+C_DECL int
 rt_hrt_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 {
     register struct hrt_specific *hrt;
@@ -364,7 +364,7 @@ rt_hrt_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 }
 
 
-void
+C_DECL void
 rt_hrt_print(register const struct soltab *stp)
 {
     register struct hrt_specific *hrt =
@@ -414,7 +414,7 @@ rt_hrt_print(register const struct soltab *stp)
  * 0 MISS
  * >0 HIT
  */
-int
+C_DECL int
 rt_hrt_shot(struct soltab *stp, register struct xray *rp, struct application *ap, struct seg *seghead)
 {
     register struct hrt_specific *hrt =
@@ -660,7 +660,7 @@ rt_hrt_shot(struct soltab *stp, register struct xray *rp, struct application *ap
 /**
  * This is the Becker vector version
  */
-void
+C_DECL void
 rt_hrt_vshot(struct soltab **stp, struct xray **rp, struct seg *segp, int n, struct application *ap)
 {
     register struct hrt_specific *hrt;
@@ -964,7 +964,7 @@ rt_hrt_vshot(struct soltab **stp, struct xray **rp, struct seg *segp, int n, str
  * Since we rescale the gradient (normal) to unity, we divide the
  * above equations by six here.
  */
-void
+C_DECL void
 rt_hrt_norm(struct hit *hitp, struct soltab *UNUSED(stp), struct xray *rp)
 {
 
@@ -983,7 +983,7 @@ rt_hrt_norm(struct hit *hitp, struct soltab *UNUSED(stp), struct xray *rp)
 }
 
 
-void
+C_DECL void
 rt_hrt_free(struct soltab *stp)
 {
     struct hrt_specific *hrt =
@@ -1045,7 +1045,7 @@ rt_hrt_24pts(fastf_t *ov, fastf_t *V, fastf_t *A, fastf_t *B)
 }
 
 
-int
+C_DECL int
 rt_hrt_plot(struct bu_list *vhead, struct rt_db_internal *ip,const struct bg_tess_tol *ttol, const struct bn_tol *UNUSED(tol), const struct bview *UNUSED(info))
 {
     struct bu_list *vlfree = &rt_vlfree;
@@ -1152,6 +1152,25 @@ rt_hrt_plot(struct bu_list *vhead, struct rt_db_internal *ip,const struct bg_tes
     VSET(ydir4_left, 0, v1_left[Z] * 0.01, 0 );
     VSET(ydir4_right, 0, v1_right[Z] * 0.01, 0 );
     VSET(upper_cusp_xdir, 0 , v3_left[Z] * 0.01 , 0 );
+
+    /* The above top-lobe/cusp centers are computed relative to the
+     * origin; offset them by the vertex so the top of the heart
+     * translates with V (The lower body below already adds hip->v
+     * explicitly). This must happen after the relative sizes derived
+     * from their [Z]/[X] components have been computed above
+     */
+    VADD2(top01_center, top01_center, hip->v);
+    VADD2(top02_center, top02_center, hip->v);
+    VADD2(top1_center, top1_center, hip->v);
+    VADD2(v1_left, v1_left, hip->v);
+    VADD2(v1_right, v1_right, hip->v);
+    VADD2(v2_left, v2_left, hip->v);
+    VADD2(v2_right, v2_right, hip->v);
+    VADD2(v3_left, v3_left, hip->v);
+    VADD2(v3_right, v3_right, hip->v);
+    VADD2(highest_point_left, highest_point_left, hip->v);
+    VADD2(highest_point_right, highest_point_right, hip->v);
+    VADD2(upper_cusp, upper_cusp, hip->v);
 
     rt_hrt_24pts(top, hip->v, top_xdir, top_ydir);
     rt_hrt_24pts(top01, top01_center, top01_xdir, top01_ydir );
@@ -1512,7 +1531,7 @@ rt_hrt_plot(struct bu_list *vhead, struct rt_db_internal *ip,const struct bg_tes
  * Ydir vector
  * Zdir vector
  */
-int
+C_DECL int
 rt_hrt_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_hrt_internal *hip;
@@ -1544,7 +1563,7 @@ rt_hrt_export5(struct bu_external *ep, const struct rt_db_internal *ip, double l
     return 0;
 }
 
-int
+C_DECL int
 rt_hrt_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !ip || !mat)
@@ -1562,9 +1581,9 @@ rt_hrt_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_inter
     VMOVE(zdir, tip->zdir);
 
     MAT4X3PNT(top->v, mat, v);
-    MAT4X3PNT(top->xdir, mat, xdir);
-    MAT4X3PNT(top->ydir, mat, ydir);
-    MAT4X3PNT(top->zdir, mat, zdir);
+    MAT4X3VEC(top->xdir, mat, xdir);
+    MAT4X3VEC(top->ydir, mat, ydir);
+    MAT4X3VEC(top->zdir, mat, zdir);
 
     return BRLCAD_OK;
 }
@@ -1573,7 +1592,7 @@ rt_hrt_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_inter
  * Import a heart from the database format to the internal format.
  *
  */
-int
+C_DECL int
 rt_hrt_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     struct rt_hrt_internal *hip;
@@ -1617,7 +1636,7 @@ rt_hrt_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fa
  * line describes type of solid.  Additional lines are indented one
  * tab, and give parameter values.
  */
-int
+C_DECL int
 rt_hrt_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local)
 {
     struct rt_hrt_internal *hip =
@@ -1686,7 +1705,7 @@ rt_hrt_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose
  * Free the storage associated with the rt_db_internal version of this
  * solid.
  */
-void
+C_DECL void
 rt_hrt_ifree(struct rt_db_internal *ip)
 {
     register struct rt_hrt_internal *hip;
@@ -1701,7 +1720,7 @@ rt_hrt_ifree(struct rt_db_internal *ip)
 }
 
 
-int
+C_DECL int
 rt_hrt_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
 {
     if (ip) RT_CK_DB_INTERNAL(ip);
@@ -1710,7 +1729,7 @@ rt_hrt_params(struct pc_pc_set *UNUSED(ps), const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_hrt_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 {
     fastf_t area_hrt_YZ_plane;
@@ -1730,7 +1749,7 @@ rt_hrt_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 /**
  * Computes centroid of a heart
  */
-void
+C_DECL void
 rt_hrt_centroid(point_t *cent, const struct rt_db_internal *ip)
 {
     struct rt_hrt_internal *hip = (struct rt_hrt_internal *)ip->idb_ptr;
@@ -1739,7 +1758,7 @@ rt_hrt_centroid(point_t *cent, const struct rt_db_internal *ip)
 }
 
 
-int
+C_DECL int
 rt_hrt_perturb(struct rt_db_internal **oip, const struct rt_db_internal *ip, int UNUSED(planar_only), fastf_t val)
 {
     if (NEAR_ZERO(val, SMALL_FASTF))

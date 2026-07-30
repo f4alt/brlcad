@@ -36,16 +36,12 @@
 #include "optical.h"
 #include "optical/light.h"
 #include "optical/plastic.h"
-#include "photonmap.h"
+#include "optical/photonmap.h"
 
 
 
 /* Fast approximation to specular term */
 #define PHAST_PHONG 1	/* See Graphics Gems IV pg 387 */
-
-/* from view.c */
-extern double AmbientIntensity;
-
 
 struct bu_structparse phong_parse[] = {
     {"%d",	1, "shine",		PL_O(shine),		BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },

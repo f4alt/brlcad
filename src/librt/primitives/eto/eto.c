@@ -141,7 +141,7 @@ struct eto_specific {
 };
 
 
-const struct bu_structparse rt_eto_parse[] = {
+EXTERNCPP const struct bu_structparse rt_eto_parse[] = {
     { "%f", 3, "V",   bu_offsetofarray(struct rt_eto_internal, eto_V, fastf_t, X), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
     { "%f", 3, "N",   bu_offsetofarray(struct rt_eto_internal, eto_N, fastf_t, X), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
     { "%f", 3, "C",   bu_offsetofarray(struct rt_eto_internal, eto_C, fastf_t, X), BU_STRUCTPARSE_FUNC_NULL, NULL, NULL },
@@ -192,7 +192,7 @@ clt_eto_pack(struct bu_pool *pool, struct soltab *stp)
 /**
  * Calculate bounding RPP of elliptical torus
  */
-int
+C_DECL int
 rt_eto_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct bn_tol *UNUSED(tol))
 {
     vect_t P, Nu, w1;	/* for RPP calculation */
@@ -256,7 +256,7 @@ rt_eto_bbox(struct rt_db_internal *ip, point_t *min, point_t *max, const struct 
  * A struct eto_specific is created, and its address is stored in
  * stp->st_specific for use by rt_eto_shot().
  */
-int
+C_DECL int
 rt_eto_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 {
     struct eto_specific *eto;
@@ -324,7 +324,7 @@ rt_eto_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 }
 
 
-void
+C_DECL void
 rt_eto_print(const struct soltab *stp)
 {
     const struct eto_specific *eto =
@@ -371,7 +371,7 @@ rt_eto_print(const struct soltab *stp)
  * 0 MISS
  * >0 HIT
  */
-int
+C_DECL int
 rt_eto_shot(struct soltab *stp, struct xray *rp, struct application *ap, struct seg *seghead)
 {
     struct eto_specific *eto =
@@ -590,6 +590,128 @@ rt_eto_shot(struct soltab *stp, struct xray *rp, struct application *ap, struct 
 
 
 /**
+ * Vectorized counterpart to rt_eto_shot().
+ *
+ * Batch-intersect n rays, one seg per ray written into the flat segp[]
+ * array (no seg-list allocation).  An eto is a quartic and a ray may
+ * pierce it as two disjoint segments (4 real roots); following the
+ * rt_tor_vshot() convention the single returned seg spans the OUTER
+ * extent (nearest entry to farthest exit).  The polynomial setup and
+ * root extraction mirror rt_eto_shot() exactly; hit_vpriv is preserved
+ * (hit_surfno=0) for rt_eto_norm().
+ */
+void
+rt_eto_vshot(struct soltab **stp, struct xray **rp, struct seg *segp, int n, struct application *ap)
+/* An array of solid pointers */
+/* An array of ray pointers */
+/* array of segs (results returned) */
+/* Number of ray/object pairs */
+{
+    int idx;
+
+    if (ap) RT_CK_APPLICATION(ap);
+
+    for (idx = 0; idx < n; idx++) {
+	struct eto_specific *eto;
+	vect_t dprime;		/* D' */
+	vect_t pprime;		/* P' */
+	vect_t work;		/* temporary vector */
+	bn_poly_t C;		/* The final equation */
+	bn_complex_t val[4];	/* The complex roots */
+	double k[4];		/* The real roots */
+	int i, j;
+	vect_t cor_pprime;	/* new ray origin */
+	fastf_t cor_proj;
+	fastf_t A1, A2, A3, A4, A5, A6, A7, A8, B1, B2, B3, C1, C2, C3, D1, term;
+
+	if (stp[idx] == 0) continue;			/* skip this ray */
+	segp[idx].seg_stp = (struct soltab *)0;		/* assume MISS */
+
+	eto = (struct eto_specific *)stp[idx]->st_specific;
+
+	/* Convert vector into the space of the unit eto */
+	MAT4X3VEC(dprime, eto->eto_R, rp[idx]->r_dir);
+	VUNITIZE(dprime);
+
+	VSUB2(work, rp[idx]->r_pt, eto->eto_V);
+	MAT4X3VEC(pprime, eto->eto_R, work);
+
+	cor_proj = VDOT(pprime, dprime);
+	VSCALE(cor_pprime, dprime, cor_proj);
+	VSUB2(cor_pprime, pprime, cor_pprime);
+
+	A1 = eto->eto_rd * eto->eu;
+	B1 = eto->eto_rc * eto->fu;
+	C1 = cor_pprime[X] * cor_pprime[X] + cor_pprime[Y] * cor_pprime[Y];
+	C2 = 2 * (dprime[X] * cor_pprime[X] + dprime[Y] * cor_pprime[Y]);
+	C3 = dprime[X] * dprime[X] + dprime[Y] * dprime[Y];
+	A2 = -eto->eto_rd * eto->eto_r * eto->eu + eto->eto_rd * eto->ev * cor_pprime[Z];
+	B2 = -eto->eto_rc * eto->eto_r * eto->fu + eto->eto_rc * eto->fv * cor_pprime[Z];
+	A3 = eto->eto_rd * eto->ev * dprime[Z];
+	B3 = eto->eto_rc * eto->fv * dprime[Z];
+	D1 = eto->eto_rc * eto->eto_rc * eto->eto_rd * eto->eto_rd;
+
+	A4 = A1*A1*C1 + B1*B1*C1 + A2*A2 + B2*B2 - D1;
+	A5 = A1*A1*C2 + B1*B1*C2 + 2*A2*A3 + 2*B2*B3;
+	A6 = A1*A1*C3 + B1*B1*C3 + A3*A3 + B3*B3;
+	A7 = 2*(A1*A2 + B1*B2);
+	A8 = 2*(A1*A3 + B1*B3);
+	term = A6*A6 - A8*A8*C3;
+
+	C.dgr=4;
+	C.cf[4] = (A4*A4 - A7*A7*C1);			/* t^0 */
+	C.cf[3] = (2*A4*A5 - A7*A7*C2 - 2*A7*A8*C1);	/* t^1 */
+	C.cf[2] = (2*A4*A6 + A5*A5 - A7*A7*C3 - 2*A7*A8*C2 - A8*A8*C1);	/* t^2 */
+	C.cf[1] = (2*A5*A6 - 2*A7*A8*C3 - A8*A8*C2);	/* t^3 */
+	C.cf[0] = term;					/* t^4 */
+
+	if ((i = rt_poly_roots(&C, val, stp[idx]->st_dp->d_namep)) != 4) {
+	    /* root finder failed / degenerate; treat as MISS (scalar logs) */
+	    continue;
+	}
+
+	/* Only real roots indicate an intersection in real space. */
+	for (j = 0, i = 0; j < 4; j++) {
+	    if (NEAR_ZERO(val[j].im, 0.0001))
+		k[i++] = val[j].re;
+	}
+
+	/* reverse above translation by adding distance to all 'k' values. */
+	for (j = 0; j < i; ++j)
+	    k[j] -= cor_proj;
+
+	if (i != 2 && i != 4)
+	    continue;		/* 0 (or reduced) roots -> MISS */
+
+	/* Sort k[] into descending order (k[0] = farthest, k[i-1] = nearest). */
+	{
+	    short lim, m;
+	    for (lim = (short)i - 1; lim > 0; lim--) {
+		for (m = 0; m < lim; m++) {
+		    if (k[m] < k[m+1]) {
+			fastf_t u = k[m];
+			k[m] = k[m+1];
+			k[m+1] = u;
+		    }
+		}
+	    }
+	}
+
+	/* Outer span: nearest entry k[i-1], farthest exit k[0]. */
+	segp[idx].seg_stp = stp[idx];
+	segp[idx].seg_in.hit_magic = RT_HIT_MAGIC;
+	segp[idx].seg_in.hit_dist = k[i-1];
+	segp[idx].seg_in.hit_surfno = 0;
+	VJOIN1(segp[idx].seg_in.hit_vpriv, pprime, k[i-1], dprime);
+	segp[idx].seg_out.hit_magic = RT_HIT_MAGIC;
+	segp[idx].seg_out.hit_dist = k[0];
+	segp[idx].seg_out.hit_surfno = 0;
+	VJOIN1(segp[idx].seg_out.hit_vpriv, pprime, k[0], dprime);
+    }
+}
+
+
+/**
  * Compute the normal to the eto, given a point on the eto centered at
  * the origin on the X-Y plane.  The gradient of the eto at that point
  * is in fact the normal vector, which will have to be given unit
@@ -608,7 +730,7 @@ rt_eto_shot(struct soltab *stp, struct xray *rp, struct application *ap, struct 
  *
  * (df/dx, df/dy, df/dz)
  */
-void
+C_DECL void
 rt_eto_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
 {
     struct eto_specific *eto =
@@ -642,7 +764,7 @@ rt_eto_norm(struct hit *hitp, struct soltab *stp, struct xray *rp)
 /**
  * Return the curvature of the eto.
  */
-void
+C_DECL void
 rt_eto_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
 {
     fastf_t a, b, ch, cv, dh, dv, k_circ, k_ell, phi, rad, xp,
@@ -705,7 +827,7 @@ rt_eto_curve(struct curvature *cvp, struct hit *hitp, struct soltab *stp)
 }
 
 
-void
+C_DECL void
 rt_eto_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct uvcoord *uvp)
 {
     fastf_t horz, theta_u, theta_v, vert;
@@ -747,7 +869,7 @@ rt_eto_uv(struct application *ap, struct soltab *stp, struct hit *hitp, struct u
 }
 
 
-void
+C_DECL void
 rt_eto_free(struct soltab *stp)
 {
     struct eto_specific *eto =
@@ -972,7 +1094,7 @@ eto_ellipse_points(
     return circumference / point_spacing;
 }
 
-int
+C_DECL int
 rt_eto_adaptive_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bn_tol *tol, const struct bview *v, fastf_t s_size)
 {
     struct rt_eto_internal *eto;
@@ -1114,7 +1236,7 @@ rt_eto_adaptive_plot(struct bu_list *vhead, struct rt_db_internal *ip, const str
  * eto_C Semimajor axis (vector) of eto cross section
  * eto_rd Semiminor axis length (scalar) of eto cross section
  */
-int
+C_DECL int
 rt_eto_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_tess_tol *ttol, const struct bn_tol *UNUSED(tol), const struct bview *UNUSED(info))
 {
     fastf_t a, b;	/* axis lengths of ellipse */
@@ -1244,7 +1366,7 @@ rt_eto_plot(struct bu_list *vhead, struct rt_db_internal *ip, const struct bg_te
 }
 
 
-int
+C_DECL int
 rt_eto_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, const struct bg_tess_tol *ttol, const struct bn_tol *tol)
 {
     fastf_t a, b;	/* axis lengths of ellipse */
@@ -1680,7 +1802,7 @@ rt_eto_tess(struct nmgregion **r, struct model *m, struct rt_db_internal *ip, co
  * Import a eto from the database format to the internal format.
  * Apply modeling transformations at the same time.
  */
-int
+C_DECL int
 rt_eto_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     struct rt_eto_internal *tip;
@@ -1734,7 +1856,7 @@ rt_eto_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fa
     tip->eto_r  = v1[X] / mat[15];
     tip->eto_rd = v1[Y] / mat[15];
 
-    if (tip->eto_r <= SMALL || tip->eto_rd <= SMALL) {
+    if (tip->eto_r <= SQRT_SMALL_FASTF || tip->eto_rd <= SQRT_SMALL_FASTF) {
 	bu_log("rt_eto_import4:  zero length R or Rd vector\n");
 	return -1;
     }
@@ -1746,7 +1868,7 @@ rt_eto_import4(struct rt_db_internal *ip, const struct bu_external *ep, const fa
 /**
  * The name will be added by the caller.
  */
-int
+C_DECL int
 rt_eto_export4(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_eto_internal *tip;
@@ -1780,7 +1902,7 @@ rt_eto_export4(struct bu_external *ep, const struct rt_db_internal *ip, double l
     return 0;
 }
 
-int
+C_DECL int
 rt_eto_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_internal *ip)
 {
     if (!rop || !ip || !mat)
@@ -1813,7 +1935,7 @@ rt_eto_mat(struct rt_db_internal *rop, const mat_t mat, const struct rt_db_inter
  * Import a eto from the database format to the internal format.
  * Apply modeling transformations at the same time.
  */
-int
+C_DECL int
 rt_eto_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fastf_t *mat, const struct db_i *dbip)
 {
     struct rt_eto_internal *tip;
@@ -1859,7 +1981,7 @@ rt_eto_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fa
 /**
  * The name will be added by the caller.
  */
-int
+C_DECL int
 rt_eto_export5(struct bu_external *ep, const struct rt_db_internal *ip, double local2mm, const struct db_i *dbip)
 {
     struct rt_eto_internal *tip;
@@ -1900,7 +2022,7 @@ rt_eto_export5(struct bu_external *ep, const struct rt_db_internal *ip, double l
  * line describes type of solid.  Additional lines are indented one
  * tab, and give parameter values.
  */
-int
+C_DECL int
 rt_eto_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose, double mm2local)
 {
     struct rt_eto_internal *tip =
@@ -1945,7 +2067,7 @@ rt_eto_describe(struct bu_vls *str, const struct rt_db_internal *ip, int verbose
 /**
  * Free the storage associated with the rt_db_internal version of this solid.
  */
-void
+C_DECL void
 rt_eto_ifree(struct rt_db_internal *ip)
 {
     struct rt_eto_internal *tip;
@@ -1959,10 +2081,11 @@ rt_eto_ifree(struct rt_db_internal *ip)
     ip->idb_ptr = ((void *)0);	/* sanity */
 }
 
-void
-rt_eto_make(const struct rt_functab *ftp, struct rt_db_internal *intern)
+C_DECL int
+rt_eto_make(const struct rt_functab *ftp, struct rt_db_internal *intern, const char* UNUSED(variant), const point_t origin, double scale)
 {
     struct rt_eto_internal* eto_ip;
+    fastf_t mag;
 
     intern->idb_type = ID_ETO;
     intern->idb_major_type = DB5_MAJORTYPE_BRLCAD;
@@ -1974,15 +2097,18 @@ rt_eto_make(const struct rt_functab *ftp, struct rt_db_internal *intern)
     intern->idb_ptr = (void *)eto_ip;
 
     eto_ip->eto_magic = RT_ETO_INTERNAL_MAGIC;
-    VSETALL(eto_ip->eto_V, 0);
+    VSET(eto_ip->eto_V, origin[X], origin[Y], origin[Z]);
     VSET(eto_ip->eto_N, 0.0, 0.0, 1.0);
-    VSET(eto_ip->eto_C, 1.0, 0.0, 0.0);
-    eto_ip->eto_r = 1.0;
-    eto_ip->eto_rd = 1.0;
+    VSET(eto_ip->eto_C, scale*0.1, 0.0, scale*0.1);
+    mag = MAGNITUDE(eto_ip->eto_C);
+    /* Close enough for now.*/
+    eto_ip->eto_r = scale*0.5 - mag*cos(M_PI_4);
+    eto_ip->eto_rd = scale*0.05;
+    return BRLCAD_OK;
 }
 
 
-int
+C_DECL int
 rt_eto_params(struct pc_pc_set *ps, const struct rt_db_internal *ip)
 {
     if (!ps) return 0;
@@ -2019,7 +2145,7 @@ eto_is_self_intersecting(const struct rt_eto_internal *tip)
 }
 
 
-void
+C_DECL void
 rt_eto_volume(fastf_t *vol, const struct rt_db_internal *ip)
 {
     fastf_t mag_c;
@@ -2041,7 +2167,7 @@ rt_eto_volume(fastf_t *vol, const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_eto_centroid(point_t *cent, const struct rt_db_internal *ip)
 {
     struct rt_eto_internal *tip = (struct rt_eto_internal *)ip->idb_ptr;
@@ -2050,7 +2176,7 @@ rt_eto_centroid(point_t *cent, const struct rt_db_internal *ip)
 }
 
 
-void
+C_DECL void
 rt_eto_surf_area(fastf_t *area, const struct rt_db_internal *ip)
 {
     fastf_t circum, mag_c;
@@ -2095,7 +2221,7 @@ eto_is_valid(struct rt_eto_internal *eto)
     return 1;
 }
 
-int
+C_DECL int
 rt_eto_labels(struct rt_point_labels *pl, int pl_max, const mat_t xform, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     int lcnt = 4;
@@ -2148,7 +2274,7 @@ rt_eto_labels(struct rt_point_labels *pl, int pl_max, const mat_t xform, const s
     return lcnt;
 }
 
-const char *
+C_DECL const char *
 rt_eto_keypoint(point_t *pt, const char *keystr, const mat_t mat, const struct rt_db_internal *ip, const struct bn_tol *UNUSED(tol))
 {
     if (!pt || !ip)
@@ -2177,7 +2303,7 @@ eto_kpt_end:
 }
 
 
-int
+C_DECL int
 rt_eto_perturb(struct rt_db_internal **oip, const struct rt_db_internal *ip, int UNUSED(planar_only), fastf_t val)
 {
     if (NEAR_ZERO(val, SMALL_FASTF))
@@ -2217,6 +2343,71 @@ rt_eto_perturb(struct rt_db_internal **oip, const struct rt_db_internal *ip, int
 
     *oip = nip;
     return BRLCAD_OK;
+}
+
+int
+rt_eto_functab_validate(struct bu_vls *error_msg, const struct rt_db_internal *ip, const struct bn_tol *tol)
+{
+    struct rt_eto_internal *eto;
+    int issues = 0;
+    const char *comma = "";
+
+    RT_CK_DB_INTERNAL(ip);
+    eto = (struct rt_eto_internal *)ip->idb_ptr;
+    RT_ETO_CK_MAGIC(eto);
+
+    if (!tol) {
+        static const struct bn_tol default_tol = BN_TOL_INIT_TOL;
+        tol = &default_tol;
+    }
+
+    bu_vls_printf(error_msg, "[");
+
+    if (MAGNITUDE(eto->eto_N) < tol->dist) {
+        bu_vls_printf(error_msg, "%s{\"problem_type\":\"zero_length_n_vector\"}", comma);
+        comma = ",";
+        issues++;
+    } else if (!NEAR_EQUAL(MAGSQ(eto->eto_N), 1.0, tol->dist)) {
+        bu_vls_printf(error_msg, "%s{\"problem_type\":\"n_not_unit_length\"}", comma);
+        comma = ",";
+        issues++;
+    }
+
+    if (MAGNITUDE(eto->eto_C) < tol->dist) {
+        bu_vls_printf(error_msg, "%s{\"problem_type\":\"zero_length_c_vector\"}", comma);
+        comma = ",";
+        issues++;
+    }
+
+    if (eto->eto_r < tol->dist) {
+        bu_vls_printf(error_msg, "%s{\"problem_type\":\"zero_length_r_value\"}", comma);
+        comma = ",";
+        issues++;
+    }
+
+    if (eto->eto_rd < tol->dist) {
+        bu_vls_printf(error_msg, "%s{\"problem_type\":\"zero_length_rd_value\"}", comma);
+        comma = ",";
+        issues++;
+    }
+
+    if (eto->eto_rd > MAGNITUDE(eto->eto_C)) {
+        bu_vls_printf(error_msg, "%s{\"problem_type\":\"rd_greater_than_c\"}", comma);
+        comma = ",";
+        issues++;
+    }
+
+    if (MAGNITUDE(eto->eto_N) > SQRT_SMALL_FASTF && MAGNITUDE(eto->eto_C) > SQRT_SMALL_FASTF) {
+        fastf_t f = VDOT(eto->eto_N, eto->eto_C) / MAGNITUDE(eto->eto_C);
+        if (!NEAR_ZERO(f, tol->perp)) {
+            bu_vls_printf(error_msg, "%s{\"problem_type\":\"n_not_perp_c\"}", comma);
+            comma = ",";
+            issues++;
+        }
+    }
+
+    bu_vls_printf(error_msg, "]");
+    return issues;
 }
 
 
