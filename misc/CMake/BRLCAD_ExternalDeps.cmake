@@ -736,6 +736,16 @@ endfunction(find_relative_rpath)
 # in place in the build locations.
 function(rpath_build_dir_process ROOT_DIR lf logfile history_log updated_var)
 
+  # Bext install trees may deliberately make runtime libraries read-only.
+  # The build tree is our private staged copy, and plief must be able to
+  # replace that file when updating ELF metadata.  Do not alter the bext
+  # source/install file itself.
+  if(UNIX AND EXISTS "${ROOT_DIR}/${lf}")
+    file(CHMOD "${ROOT_DIR}/${lf}"
+      PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                  GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+  endif()
+
   if(P_RPATH_EXECUTABLE)
     execute_process(
       COMMAND ${P_RPATH_EXECUTABLE} --set-rpath "${ROOT_DIR}/${LIB_DIR}" ${lf}
@@ -839,6 +849,17 @@ function(brlcad_bext_process)
       file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/bext_build" "${CMAKE_CURRENT_BINARY_DIR}/bext_output")
     endif(BEXT_REFRESH_NEEDED)
     brlcad_ext_setup()
+  endif()
+
+  # Never allow an unset or incomplete dependency path to reach the recursive
+  # inventory logic below.  An empty root would make its glob scan "/".
+  if(NOT IS_DIRECTORY "${BRLCAD_EXT_INSTALL_DIR}" OR NOT IS_DIRECTORY "${BRLCAD_EXT_NOINSTALL_DIR}")
+    message(
+      FATAL_ERROR
+      "External dependency setup did not produce usable install and noinstall directories:\n"
+      "  install: ${BRLCAD_EXT_INSTALL_DIR}\n"
+      "  noinstall: ${BRLCAD_EXT_NOINSTALL_DIR}"
+    )
   endif()
 
   # If we have a bext directories in the build directory, we need to clear them for distcheck
@@ -1738,6 +1759,13 @@ endfunction()
   foreach(ef ${TP_NOINST_FILES})
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${BRLCAD_EXT_NOINSTALL_DIR}/${ef})
   endforeach(ef ${TP_NOINST_FILES})
+
+  # We got these from brlcad_ext_setup, but they're now scoped to our
+  # function.  Let the parent context know as well.
+  set(BRLCAD_EXT_DIR "${BRLCAD_EXT_DIR}" PARENT_SCOPE)
+  set(BRLCAD_EXT_INSTALL_DIR "${BRLCAD_EXT_INSTALL_DIR}" PARENT_SCOPE)
+  set(BRLCAD_EXT_NOINSTALL_DIR "${BRLCAD_EXT_NOINSTALL_DIR}" PARENT_SCOPE)
+
 endfunction(brlcad_bext_process)
 
 #####################################################################
@@ -2042,6 +2070,12 @@ function(_brlcad_ensure_soname lib_path)
   if(NOT lib_path OR NOT EXISTS "${lib_path}")
     return()
   endif()
+  # We only do this if it's a copy in our build tree
+  get_filename_component(_abs_dir "${lib_path}" ABSOLUTE)
+  is_subpath("${BRLCAD_BINARY_DIR}" "${_abs_dir}" _is_local)
+  if (NOT _is_local)
+    return()
+  endif()
   # Only shared libraries (.so / .dylib) need a SONAME.
   if(NOT lib_path MATCHES "\\.so(\\.[0-9]+)*$" AND NOT lib_path MATCHES "\\.dylib$")
     return()
@@ -2056,6 +2090,13 @@ function(_brlcad_ensure_soname lib_path)
   endif()
   if(NOT _soname_tool)
     return()
+  endif()
+  # The path is a build-tree copy, but it may retain a read-only mode from the
+  # bext install tree.  SONAME insertion rewrites the ELF file.
+  if(UNIX)
+    file(CHMOD "${lib_path}"
+      PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
+                  GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
   endif()
   # Read the existing SONAME (empty output = no SONAME).
   execute_process(

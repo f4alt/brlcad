@@ -47,7 +47,7 @@
 #include "bio.h"
 
 #include "bu/log.h"
-#include "bu/time.h"
+#include "bu/datetime.h"
 #include "bu/parallel.h"
 #include "bu/str.h"
 #include "bu/vls.h"
@@ -69,7 +69,7 @@ static constexpr int64_t nsec_per_windows_tick = 100;
 #endif
 
 extern "C" {
-int BU_SEM_DATETIME;
+int BU_SEM_DATETIME = BU_SEM_ID_DATETIME;
 }
 
 #if defined(HAVE_GETPROCESSTIMES) || defined(HAVE_GETTHREADTIMES)
@@ -306,6 +306,16 @@ bu_timer_cpu_thread(void)
 	return timer_filetime(&kernel_time, &user_time);
     }
 
+#elif defined(HAVE_MACH_THREAD_CPUTIME)
+    {
+	int64_t mach_cpu_time = timer_mach_thread();
+
+	if (mach_cpu_time >= 0)
+	    return mach_cpu_time;
+
+	return -1;
+    }
+
 #elif defined(CLOCK_THREAD_CPUTIME_ID)
     {
 	struct timespec thread_time;
@@ -326,15 +336,6 @@ bu_timer_cpu_thread(void)
 	return -1;
     }
 
-#elif defined(HAVE_MACH_THREAD_CPUTIME)
-    {
-	int64_t mach_cpu_time = timer_mach_thread();
-
-	if (mach_cpu_time >= 0)
-	    return mach_cpu_time;
-
-	return -1;
-    }
 #else
 
 #  warning "bu_timer_cpu_thread() implementation missing for this machine type"

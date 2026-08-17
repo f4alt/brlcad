@@ -15,6 +15,7 @@ set(
   test_cache.cpp
   test_cmd.c
   test_color.c
+  test_convert.c
   test_datetime.c
   test_dir.c
   test_dirname.c
@@ -82,6 +83,21 @@ if(TARGET bu_test)
 endif()
 distclean("${CMAKE_CURRENT_BINARY_DIR}/bu_test.core")
 distclean("${CMAKE_BINARY_DIR}/${LIB_DIR}/bu_test.exp")
+
+# Exercise client constructors linked ahead of the static libbu archive.  A
+# timeout converts any pre-main self-deadlock into a bounded test failure.
+if(TARGET libbu-static)
+  brlcad_addexec(bu_static_init test_static_init.cpp "libbu-static;Threads::Threads" TEST)
+  brlcad_add_test(NAME bu_static_init COMMAND bu_static_init)
+  set_tests_properties(bu_static_init PROPERTIES TIMEOUT 10)
+endif()
+
+brlcad_addexec(bu_semaphore_registry test_semaphore_registry.cpp "libbu;Threads::Threads" TEST)
+brlcad_add_test(NAME bu_semaphore_registry COMMAND bu_semaphore_registry)
+
+brlcad_addexec(bu_parallel_concurrency test_parallel_concurrency.cpp "libbu;Threads::Threads" TEST)
+brlcad_add_test(NAME bu_parallel_concurrency COMMAND bu_parallel_concurrency)
+set_tests_properties(bu_parallel_concurrency PROPERTIES TIMEOUT 30)
 
 # The uuid code doesn't mix with C++ compilers - make a separate
 # C-only executable for this case
@@ -450,6 +466,11 @@ brlcad_add_test(NAME bu_str_to_rgb_12 COMMAND bu_test test_color 3 "#C4D" 204,68
 # integers or floats.
 
 brlcad_add_test(NAME bu_color_to_rgb_floats_1 COMMAND bu_test test_color 4 192,78,214)
+
+# New consolidated color API tests.
+brlcad_add_test(NAME bu_color_parse COMMAND bu_test test_color 8)
+brlcad_add_test(NAME bu_color_format COMMAND bu_test test_color 9)
+brlcad_add_test(NAME bu_color_convert COMMAND bu_test test_color 10)
 
 #
 # ************ test_str.c tests ************
@@ -844,6 +865,7 @@ brlcad_add_test(NAME bu_test_observer COMMAND bu_test test_observer)
 brlcad_add_test(NAME bu_test_vlb COMMAND bu_test test_vlb)
 brlcad_add_test(NAME bu_test_units COMMAND bu_test test_units)
 brlcad_add_test(NAME bu_test_endian COMMAND bu_test test_endian)
+brlcad_add_test(NAME bu_test_convert COMMAND bu_test test_convert)
 
 #
 #  *********** bu_dlopen/bu_dlsym test ************

@@ -13,6 +13,22 @@ changes made.  See document footer for additional details.
 --- 20XX-XX-XX  Release 7.46.0                                     ---
 ----------------------------------------------------------------------
 
+* rt preserves eye_pt setting in command scripts - Sean Morrison
+* documented gqa centroid & moments of inertia options - Sean Morrison
+* pixdiff now calculates pixel differences on bw files - Sean Morrison
+* fixed benchmark+pixcmp correctness validation bug - Sean Morrison
+* fbhelp writes help  to stdout and rest to stderr - Sean Morrison
+* FB now supports /dev/stdout and /dev/stderr devices - Sean Morrison
+* fixed mged rt -C + -o background color to file bug - Sean Morrison
+* fixed rt -C255/0/0 -o file.pix background color bug - Sean Morrison
+* added rtsil foreground & background -c set options - Sean Morrison
+* fixed pixdiff bug on Windows - Sean Morrison
+* fixed pixborder utilitiy right-side edge bug - Sean Morrison
+* fixed 'wavelet' image processing tool on Windows - Sean Morrison
+* quieted mged killtree spurious lookup failure output - Sean Morrison
+* fixed ray tracing small images to disk framebuffers - Sean Morrison
+* improved raytracing performance of CSG-heavy regions - Sean Morrison
+* fixed OBJ conversion bug importing unnamed groups - Sean Morrison
 * new doc guide, a visual overview of BRL-CAD objects - Sean Morrison
 * fixed submodel paths relative to parent databases - Sean Morrison
 * improved performance making huge combinations - Sean Morrison

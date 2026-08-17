@@ -10,6 +10,8 @@
 #   bash src/rt/tests/run_rt_opt_lcov.sh
 #
 
+set(RT_TEST_DB "${CMAKE_SOURCE_DIR}/src/libged/tests/draw/moss.g")
+
 set(
   RT_OPT_TESTS
   size
@@ -76,16 +78,69 @@ brlcad_add_test(
   COMMAND
     "${CMAKE_COMMAND}"
     "-DRTSIL=$<TARGET_FILE:rtsil>"
-    "-DDB=${CMAKE_BINARY_DIR}/${DATA_DIR}/db/moss.g"
+    "-DDB=${RT_TEST_DB}"
     "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/test_rtsil_output.cmake"
+)
+# Since the test is a CMake script, we need to ensure the target
+# dependencies ourselves
+add_dependencies(unit rtsil)
+add_dependencies(check rtsil)
+
+brlcad_add_test(
+  NAME rtxray_bw_output
+  COMMAND
+    "${CMAKE_COMMAND}"
+    "-DRTXRAY=$<TARGET_FILE:rtxray>"
+    "-DDB=${RT_TEST_DB}"
+    "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test_rtxray_bw_output.cmake"
+)
+
+brlcad_add_test(
+  NAME rt_disk_framebuffer_size
+  COMMAND
+    "${CMAKE_COMMAND}"
+    "-DRT=$<TARGET_FILE:rt>"
+    "-DDB=${RT_TEST_DB}"
+    "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test_rt_disk_framebuffer_size.cmake"
+)
+# Since the test is a CMake script, we need to ensure the target
+# dependencies ourselves
+add_dependencies(unit rt)
+add_dependencies(check rt)
+
+
+brlcad_add_test(
+  NAME rt_unbuffered_background
+  COMMAND
+    "${CMAKE_COMMAND}"
+    "-DRT=$<TARGET_FILE:rt>"
+    "-DDB=${RT_TEST_DB}"
+    "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test_rt_unbuffered_background.cmake"
+)
+
+brlcad_add_test(
+  NAME rt_command_view
+  COMMAND
+    "${CMAKE_COMMAND}"
+    "-DRT=$<TARGET_FILE:rt>"
+    "-DDB=${RT_TEST_DB}"
+    "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/test_rt_command_view.cmake"
 )
 
 # Housekeeping
 cmakefiles(
   CMakeLists.txt
+  test_rt_command_view.cmake
+  test_rt_disk_framebuffer_size.cmake
+  test_rt_unbuffered_background.cmake
   test_rt_opt.c
   test_rtsil_output.cmake
+  test_rtxray_bw_output.cmake
   run_rt_opt_lcov.sh
   run_rt_opt_short_compare.sh
 )
