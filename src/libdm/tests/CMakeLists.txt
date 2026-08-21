@@ -10,12 +10,14 @@ brlcad_add_test(NAME dm_dlist_sensor COMMAND test_dm_dlist_sensor)
 # renderer mock so atlas, ownership, and UTF-8 behavior do not require OpenGL.
 set_source_files_properties(fontstash_test.c PROPERTIES LANGUAGE CXX)
 brlcad_addexec(test_fontstash fontstash_test.c "libbu;${M_LIBRARY}" TEST)
-target_include_directories(
-  test_fontstash
-  PRIVATE
-    ${CMAKE_SOURCE_DIR}/src/libbu
-    ${CMAKE_SOURCE_DIR}/src/libdm/fontstash
-)
+if(BUILD_TESTING AND TARGET test_fontstash)
+  target_include_directories(
+    test_fontstash
+    PRIVATE
+      ${CMAKE_SOURCE_DIR}/src/libbu
+      ${CMAKE_SOURCE_DIR}/src/libdm/fontstash
+  )
+endif()
 
 brlcad_add_test(
   NAME dm_fontstash
@@ -25,12 +27,16 @@ brlcad_add_test(
 brlcad_addexec(test_fb_standard_stream test_fb_standard_stream.c "libdm;libbu" TEST)
 brlcad_add_test(NAME dm_fb_standard_stream COMMAND test_fb_standard_stream)
 
+brlcad_addexec(test_fb_disk_fd test_fb_disk_fd.c "libdm;libbu" TEST)
+brlcad_add_test(NAME dm_fb_disk_fd COMMAND test_fb_disk_fd)
+
 cmakefiles(CMakeLists.txt)
 cmakefiles(
   dm_test.c
   fontstash_test.c
   test_dlist_sensor.c
   #test_fb_standard_stream.c
+  test_fb_disk_fd.c
 )
 
 # Local Variables:

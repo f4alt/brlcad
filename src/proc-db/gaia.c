@@ -1,4 +1,4 @@
-/*                      E A R T H G E N . C
+/*                         G A I A . C
  * BRL-CAD
  *
  * Copyright (c) 2026 United States Government as represented by
@@ -17,14 +17,14 @@
  * License along with this file; see the file named COPYING for more
  * information.
  */
-/** @file proc-db/earthgen.c
+/** @file proc-db/gaia.c
  *
  * Generate a BRL-CAD .g model of Earth from real elevation data.
  *
  * Reads a global elevation raster (ETOPO 2022 GeoTIFF or any
  * GDAL-readable DEM) and constructs a cubed-sphere globe from six
  * DSP (displacement-map) height-field primitives.  Each face is
- * reprojected via a gnomonic projection centered on the face,
+ * reprojected via an orthographic projection centered on the face,
  * creating a tangent-plane tile positioned on the sphere.  A water
  * sphere at sea-level radius is boolean-subtracted from the terrain
  * to create distinct ocean geometry.
@@ -36,10 +36,40 @@
  * All coordinates are millimeters (BRL-CAD convention).
  *
  * Usage:
- *   earthgen input.tif output.g [--dim N] [--exaggeration F]
+ *   gaia input.tif output.g [--dim N] [--exaggeration F]
  *
- * Example:
- *   earthgen ETOPO_2022_v1_60s_N90W180_surface.tif earth.g
+ * ======================================================================
+ * OBTAINING TERRAIN DATASETS (Low / Medium / High Fidelity)
+ * ======================================================================
+ *
+ * Public Domain Global Relief Datasets from NOAA NCEI (ETOPO 2022):
+ *
+ * 1. LOW FIDELITY (Fast preview / testing, ~20 MB downsampled raster, dim 256):
+ *    Download the 60s global GeoTIFF and downsample it with GDAL:
+ *      curl -L -o /tmp/ETOPO_2022_v1_60s_N90W180_surface.tif \
+ *        "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif"
+ *      gdal_translate -outsize 25% 25% -r bilinear \
+ *        /tmp/ETOPO_2022_v1_60s_N90W180_surface.tif /tmp/earth_low.tif
+ *      gaia /tmp/earth_low.tif earth_low.g --dim 256 --exaggeration 40
+ *
+ * 2. MEDIUM FIDELITY (Standard production globe, ~444 MB GeoTIFF, dim 600-900):
+ *    Full 60 arc-second (~1.85 km) global relief grid:
+ *      curl -L -o /tmp/ETOPO_2022_v1_60s_N90W180_surface.tif \
+ *        "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif"
+ *      gaia /tmp/ETOPO_2022_v1_60s_N90W180_surface.tif earth_med.g --dim 600 --exaggeration 40
+ *
+ * 3. HIGH FIDELITY (High detail topography & bathymetry, ~1.5 GB GeoTIFF, dim 1200-2048):
+ *    Full 30 arc-second (~900 m) global relief grid:
+ *      curl -L -o /tmp/ETOPO_2022_v1_30s_N90W180_surface.tif \
+ *        "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/30s/30s_surface_elev_gtif/ETOPO_2022_v1_30s_N90W180_surface.tif"
+ *      gaia /tmp/ETOPO_2022_v1_30s_N90W180_surface.tif earth_high.g --dim 1200 --exaggeration 40
+ *
+ *    Alternatively, 15 arc-second (~450 m) regional tiles can be downloaded
+ *    from https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/15s/15s_surface_elev_gtif/
+ *    and combined into a seamless GDAL Virtual Dataset (.vrt):
+ *      gdalbuildvrt /tmp/etopo_15s.vrt /tmp/ETOPO_2022_v1_15s_*.tif
+ *      gaia /tmp/etopo_15s.vrt earth_15s.g --dim 1200 --exaggeration 40
+ * ======================================================================
  */
 
 #include "common.h"
@@ -55,6 +85,7 @@
 #include "bu/env.h"
 #include "bu/log.h"
 #include "bu/str.h"
+#include "bu/path.h"
 #include "bn.h"
 #include "raytrace.h"
 #include "rt/geom.h"
@@ -186,7 +217,7 @@ build_stom(double lat_deg, double lon_deg, unsigned int dim,
 
 
 /**
- * Warp the source raster to a gnomonic projection centred on a cube
+ * Warp the source raster to an orthographic projection centred on a cube
  * face.  The output covers +/- extent_m on the tangent plane,
  * resampled to dim x dim pixels.
  *
@@ -264,11 +295,11 @@ process_face(GDALDatasetH src, struct rt_wdb *wdbp,
     double *elev;
     unsigned short *grid;
     size_t count;
-    unsigned int row;
+    unsigned int dx, dy;
 
     double cell_mm   = cell_m * M2MM;
     double cell_z_mm = cell_z_m * M2MM;
-    
+
     /* Z_base is chosen deep enough to intersect the water sphere
      * cleanly and to bound the valid region from the origin.
      * For an inscribed cube wedge, the minimum Z is R/sqrt(3).
@@ -284,7 +315,7 @@ process_face(GDALDatasetH src, struct rt_wdb *wdbp,
     snprintf(name_pyr,   sizeof(name_pyr),   "pyr_%s.s",     face->tag);
     snprintf(name_comb,  sizeof(name_comb),  "face_%s.c",    face->tag);
 
-    bu_log("earthgen: face %s  center (%.1f, %.1f) ...\n",
+    bu_log("gaia: face %s  center (%.1f, %.1f) ...\n",
 	   face->tag, face->lat_0, face->lon_0);
 
     /* ---- Warp source data to orthographic for this face. ---- */
@@ -294,7 +325,7 @@ process_face(GDALDatasetH src, struct rt_wdb *wdbp,
     warped = warp_face(src, face->lat_0, face->lon_0,
 		       (int)dim, extent_m);
     if (!warped) {
-	bu_log("earthgen: warp failed for face %s\n", face->tag);
+	bu_log("gaia: warp failed for face %s\n", face->tag);
 	return -1;
     }
 
@@ -306,32 +337,28 @@ process_face(GDALDatasetH src, struct rt_wdb *wdbp,
     band = GDALGetRasterBand(warped, 1);
     nodata_val = GDALGetRasterNoDataValue(band, &has_nodata);
 
-    /* Read elevation row-by-row, flipping Y axis.
-     * GDAL: y=0 is top (north).  DSP: y=0 is bottom (south). */
-    for (row = 0; row < dim; row++) {
+    /* Read elevation row-by-row, flipping Y axis so dy=0 is South and dy=dim-1 is North.
+     * GDAL: row=0 is North, row=dim-1 is South. */
+    for (dy = 0; dy < dim; dy++) {
 	if (GDALRasterIO(band, GF_Read,
-			 0, (int)(dim - 1 - row),
+			 0, (int)(dim - 1 - dy),
 			 (int)dim, 1,
-			 &elev[(size_t)row * dim],
+			 &elev[(size_t)dy * dim],
 			 (int)dim, 1,
 			 GDT_Float64, 0, 0) != CE_None) {
-	    bu_log("earthgen: read error face %s row %u\n",
-		   face->tag, row);
+	    bu_log("gaia: read error face %s row %u\n",
+		   face->tag, dy);
 	}
     }
     GDALClose(warped);
 
     /* ---- Compute radial displacement and quantize. ---- */
-    unsigned int gy, gx;
-    for (gy = 0; gy < dim; gy++) {
-        double y = extent_m - gy * cell_m;
-        unsigned int dy = dim - 1 - gy;
-        for (gx = 0; gx < dim; gx++) {
-            double x = -extent_m + gx * cell_m;
-            unsigned int dx = gx;
-            size_t k_elev = (size_t)gy * dim + gx;
-            size_t k_grid = (size_t)dy * dim + dx;
-            double h = elev[k_elev];
+    for (dy = 0; dy < dim; dy++) {
+        double y = -extent_m + dy * cell_m;
+        for (dx = 0; dx < dim; dx++) {
+            double x = -extent_m + dx * cell_m;
+            size_t k = (size_t)dy * dim + dx;
+            double h = elev[k];
             double z_val, z_dsp;
             long v;
             double r_sq = x*x + y*y;
@@ -340,42 +367,35 @@ process_face(GDALDatasetH src, struct rt_wdb *wdbp,
             if (h > max_h) max_h = (float)h;
 
             if (has_nodata && NEAR_EQUAL(h, nodata_val, 1.0))
-                h = 0.0;
+                h = -100.0;
+
+            if (h <= 0.0) {
+                h = -100.0;
+            }
 
             if (r_sq >= R_m * R_m) {
                 z_val = z_base_m;
             } else {
-                double R_elev = R_m + (h / 1000.0) * exag;
+                double R_elev = R_m + h * exag;
                 double under_sqrt = R_elev * R_elev - r_sq;
                 if (under_sqrt < 0.0) under_sqrt = 0.0;
                 z_val = sqrt(under_sqrt);
             }
 
             if (z_val < z_base_m) z_val = z_base_m;
-            
+
             z_dsp = z_val - z_base_m;
             v = (long)(z_dsp / cell_z_m + 0.5);
 
             if (v < 0)      v = 0;
             if (v > U16MAX) v = U16MAX;
-            grid[k_grid] = (unsigned short)v;
+            grid[k] = (unsigned short)v;
         }
     }
     printf("Face %s: elevation min=%f, max=%f\n", face->tag, min_h, max_h);
     bu_free(elev, "elevation");
 
-    /* Convert to network (big-endian) byte order. */
-    {
-	int in_c  = bu_cv_cookie("hus");
-	int out_c = bu_cv_cookie("nus");
-	if (bu_cv_optimize(in_c) != bu_cv_optimize(out_c)) {
-	    bu_cv_w_cookie(grid, out_c,
-			   count * sizeof(unsigned short),
-			   grid, in_c, count);
-	}
-    }
-
-    /* Write the height data as a BINUNIF object in the .g. */
+    /* Write the height data as a BINUNIF object in the .g (host endian, mk_binunif handles network byte order). */
     mk_binunif(wdbp, name_data, (void *)grid, WDB_BINUNIF_UINT16, count);
     bu_free(grid, "dsp grid");
 
@@ -405,9 +425,9 @@ process_face(GDALDatasetH src, struct rt_wdb *wdbp,
         vect_t e, n, u;
         double D = 2.0 * radius_mm; // Far outside
         double overlap = 1.0; // Exact partition
-        
+
         geo_frame(face->lat_0, face->lon_0, e, n, u);
-        
+
         /* Base vertices (CCW from outside looking in to origin) */
         VSET(pts[0], D * (u[X] + overlap*e[X] + overlap*n[X]), D * (u[Y] + overlap*e[Y] + overlap*n[Y]), D * (u[Z] + overlap*e[Z] + overlap*n[Z]));
         VSET(pts[1], D * (u[X] - overlap*e[X] + overlap*n[X]), D * (u[Y] - overlap*e[Y] + overlap*n[Y]), D * (u[Z] - overlap*e[Z] + overlap*n[Z]));
@@ -415,7 +435,7 @@ process_face(GDALDatasetH src, struct rt_wdb *wdbp,
         VSET(pts[3], D * (u[X] + overlap*e[X] - overlap*n[X]), D * (u[Y] + overlap*e[Y] - overlap*n[Y]), D * (u[Z] + overlap*e[Z] - overlap*n[Z]));
         /* Apex */
         VSET(pts[4], 0.0, 0.0, 0.0);
-        
+
         mk_arb5(wdbp, name_pyr, (const fastf_t *)pts);
     }
 
@@ -428,7 +448,7 @@ process_face(GDALDatasetH src, struct rt_wdb *wdbp,
         mk_lcomb(wdbp, name_comb, &comb_hd, 0, NULL, NULL, NULL, 0);
     }
 
-    bu_log("earthgen: face %s  %ux%u  cell %.1f km\n",
+    bu_log("gaia: face %s  %ux%u  cell %.1f km\n",
 	   face->tag, dim, dim, cell_m / 1000.0);
     return 0;
 }
@@ -451,6 +471,7 @@ main(int ac, char *av[])
 
     const char *input_path;
     const char *output_path;
+    char title[1024];
 
     struct wmember terr_hd, water_hd, all_hd;
     unsigned char land_rgb[3]  = { 110, 130, 80 };
@@ -498,7 +519,7 @@ main(int ac, char *av[])
 		     | GDAL_OF_VERBOSE_ERROR,
 		     NULL, NULL, NULL);
     if (!src)
-	bu_exit(2, "earthgen: cannot open '%s'\n", input_path);
+	bu_exit(2, "gaia: cannot open '%s'\n", input_path);
 
     /* Query the global elevation range from band statistics. */
     band = GDALGetRasterBand(src, 1);
@@ -512,7 +533,7 @@ main(int ac, char *av[])
     raw_range = raw_max - raw_min;
     if (raw_range < 1.0) raw_range = 1.0;
 
-    bu_log("earthgen: elevation %.1f .. %.1f m   (x%.0f)\n",
+    bu_log("gaia: elevation %.1f .. %.1f m   (x%.0f)\n",
 	   raw_min, raw_max, exag);
 
     /* Uniform cell spacing: the orthographic face spans +/- R/sqrt(2) on the
@@ -525,28 +546,31 @@ main(int ac, char *av[])
      * exaggerated mountain peak into uint16.
      */
     double z_base_m = 3000.0; /* Deep inside the Earth */
-    double z_max_m = EARTH_R_M + (raw_max / 1000.0) * exag;
+    double z_max_m = EARTH_R_M + raw_max * exag;
     double span_z_m = z_max_m - z_base_m;
-    
+
     cell_z_m = span_z_m / (double)U16MAX;
 
-    bu_log("earthgen: dim=%u  cell_xy=%.1f km  cell_z=%.1f m  exag=%.0fx\n",
+    bu_log("gaia: dim=%u  cell_xy=%.1f km  cell_z=%.1f m  exag=%.0fx\n",
 	   dim, cell_m / 1000.0, cell_z_m, exag);
 
     /* ---- Open the output .g database. ---- */
     wdbp = wdb_fopen(output_path);
     if (!wdbp) {
 	GDALClose(src);
-	bu_exit(3, "earthgen: cannot create '%s'\n", output_path);
+	bu_exit(3, "gaia: cannot create '%s'\n", output_path);
     }
-    mk_id_units(wdbp, "Earth Terrain Model", "mm");
+    snprintf(title, sizeof(title),
+	     "GAIA: Earth Terrain Model, derived from %s to 6x%ux%u at %gx",
+	     bu_path_basename(input_path, NULL), dim, dim, exag);
+    mk_id_units(wdbp, title, "mm");
 
     /* ---- Process each cube face. ---- */
     for (i = 0; i < NFACES; i++) {
 	if (process_face(src, wdbp, &faces[i], dim,
 			 exag,
 			 cell_m, cell_z_m, radius_mm) != 0) {
-	    bu_log("earthgen: WARNING - face %s failed\n",
+	    bu_log("gaia: WARNING - face %s failed\n",
 		   faces[i].tag);
 	}
     }
@@ -587,7 +611,7 @@ main(int ac, char *av[])
     (void)mk_addmember("water.r",   &all_hd.l, NULL, WMOP_UNION);
     mk_lcomb(wdbp, "earth.all", &all_hd, 0, NULL, NULL, NULL, 0);
 
-    bu_log("earthgen: wrote %s  (top-level: 'earth.all')\n",
+    bu_log("gaia: wrote %s  (top-level: 'earth.all')\n",
 	   output_path);
 
     db_close(wdbp->dbip);

@@ -23,6 +23,7 @@
  * ratio and that IFPainter produces the same pixels as a reference resize.
  */
 
+#include "bu.h"
 #include "pch.h"
 
 namespace {
@@ -44,10 +45,8 @@ removeImages(const std::filesystem::path &fullPath, const std::filesystem::path 
 {
     bool success = true;
     for (const std::filesystem::path &path : {fullPath, previewPath}) {
-	std::error_code removeError;
-	std::filesystem::remove(path, removeError);
-	if (removeError) {
-	    std::cerr << "Could not remove " << path << ": " << removeError.message() << "\n";
+	if (!bu_file_delete(path.string().c_str())) {
+	    std::cerr << "Could not remove " << path << "\n";
 	    success = false;
 	}
     }
@@ -59,6 +58,8 @@ removeImages(const std::filesystem::path &fullPath, const std::filesystem::path 
 int
 main(int argc, const char **argv)
 {
+    bu_setprogname(argv[0]);
+
     if (argc != 2) {
 	std::cerr << "Usage: " << argv[0] << " output-directory\n";
 	return 1;
