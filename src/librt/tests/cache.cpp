@@ -351,10 +351,10 @@ subprocess_launcher(int id, void *data)
     sd->result = 0;
 
     struct bu_process *p = NULL;
-    bu_process_create(&p, (const char **)av, BU_PROCESS_DEFAULT);
+    bu_process_create(&p, (const char **)av, BU_PROCESS_OUT_EQ_ERR);
     bu_vls_printf(sd->sd_result, "Test %ld(process %ld): running...\n", sd->test_num, sd->process_num);
 
-    while (bu_process_read_n(p, BU_PROCESS_STDERR, MAXPATHLEN+501, (char *)line) > 0) {
+    while (bu_process_read_n(p, BU_PROCESS_STDOUT, MAXPATHLEN+501, (char *)line) > 0) {
 	bu_vls_printf(sd->sd_result, "%s\n", line);
 	memset(line, 0, MAXPATHLEN+501);
     }
@@ -389,10 +389,12 @@ test_cache(char *rp, long int test_num, long int obj_cnt, int do_parallel, int d
     bu_vls_sprintf(&cache_dir, "%s_dir_%ld_%ld", RTC_PREFIX, test_num, obj_cnt);
     bu_vls_sprintf(&gfile, "%s_%ld_%ld.g", RTC_PREFIX, test_num, obj_cnt);
 
-    bu_setenv("LIBRT_CACHE", bu_dir(NULL, 0, BU_DIR_CURR, bu_vls_cstr(&cache_dir), NULL), 1);
+    const char *cache_path = bu_dir(NULL, 0, BU_DIR_CURR, bu_vls_cstr(&cache_dir), NULL);
+    if (bu_setenv("LIBRT_CACHE", cache_path, 1) != 0)
+	bu_exit(1, "Test %ld: failed to set LIBRT_CACHE\n", test_num);
 
-    if (bu_file_exists(getenv("LIBRT_CACHE"), NULL)) {
-	bu_exit(1, "Test %ld: stale test cache directory %s exists\n", test_num, getenv("LIBRT_CACHE"));
+    if (bu_file_exists(cache_path, NULL)) {
+	bu_exit(1, "Test %ld: stale test cache directory %s exists\n", test_num, cache_path);
     }
 
     dbip = create_test_g_file(test_num, bu_vls_cstr(&gfile));
@@ -633,4 +635,3 @@ main(int ac, char *av[])
 // c-file-style: "stroustrup"
 // End:
 // ex: shiftwidth=4 tabstop=8
-

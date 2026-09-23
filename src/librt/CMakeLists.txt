@@ -130,6 +130,7 @@ set(
   db_io.c
   db_lookup.c
   db_match.c
+  db_name.c
   db_open.c
   db_scan.c
   db_tree.cpp
@@ -167,6 +168,7 @@ set(
   primitives/bot/btg.c
   primitives/bot/btgf.c
   primitives/bot/decimate.c
+  primitives/bot/decimate_validate.cpp
   primitives/bot/plate.cpp
   primitives/bot/repair.cpp
   primitives/bot/sampling_checks.cpp
@@ -324,6 +326,7 @@ set(
   cut_hlbvh.h
   prcomb.c
   primitives/bot/bot_edge.h
+  primitives/bot/decimate_private.h
   primitives/bot/bot_wireframe.cpp
   primitives/bot/edbot.c
   primitives/bot/tie.c
@@ -424,6 +427,7 @@ endif(BRLCAD_ENABLE_SPR)
 set(LIBRT_PUBLIC_LIBS ${librt_deps} OPENNURBS::OPENNURBS)
 set(
   LIBRT_PRIVATE_LIBS
+  Threads::Threads
   ${OPENCL_LIBS}
   mmesh::mmesh
   REGEX::REGEX
@@ -434,9 +438,7 @@ set(
 )
 
 # Include directories needed by librt users
-# ${GTE_INCLUDE_DIR} is still needed by primitives/bot/bot_oriented_bbox.cpp
-# which uses GTE's ContOrientedBox3.h.
-set(RT_INCLUDE_DIRS ${OPENCL_INCLUDE_DIRS} ${GTE_INCLUDE_DIR})
+set(RT_INCLUDE_DIRS ${OPENCL_INCLUDE_DIRS})
 
 # locally used but not needed by users of the library
 set(
@@ -444,6 +446,7 @@ set(
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/vds
   ${BRLCAD_SOURCE_DIR}/src/libbu
+  ${BRLCAD_SOURCE_DIR}/src/libbg
   ${REGEX_INCLUDE_DIRS}
 )
 # FIXME: needs materialX
@@ -487,6 +490,7 @@ brlcad_addlib(librt "${LIBRT_SOURCES}" "${RT_INCLUDE_DIRS}" "${RT_LOCAL_INCLUDE_
     primitives/bot/btg.c
     primitives/bot/btgf.c
     primitives/bot/decimate.c
+    primitives/bot/decimate_validate.cpp
     primitives/bot/plate.cpp
     primitives/bot/repair.cpp
     primitives/bot/sampling_checks.cpp

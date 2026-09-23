@@ -27,7 +27,9 @@
 
 /* Includes for C++17 threading support (used for async ged_exec) */
 #include <atomic>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 #include <thread>
 
 #include "./mged.h"
@@ -109,9 +111,50 @@ static int MGED_SEM_LOG = -1;
 /* Wake event the worker posts to break the main thread out of Tcl_DoOneEvent.
  * It carries no payload pointing into the run_ged_async frame,
  * so it is safe to service even if a later Tcl_DoOneEvent runs it after the
- * loop has already exited via 'done'. anonymous namespace is not technically
- * required right now, but safely avoids potential collision in the future. */
-namespace { struct WakeEvent { Tcl_Event event; }; }
+ * loop has already exited via 'done'.  The anonymous namespace also avoids
+ * potential future name collisions. */
+namespace {
+
+struct WakeEvent {
+    Tcl_Event event;
+};
+
+struct AsyncCommandState {
+    std::atomic<bool> interrupt_requested{false};
+    Tcl_Interp *search_interp = nullptr;
+};
+
+static AsyncCommandState *
+active_command_state(struct mged_state *s)
+{
+    return s ? static_cast<AsyncCommandState *>(s->command_state) : nullptr;
+}
+
+
+static void
+delete_search_interp(AsyncCommandState *command_state)
+{
+    if (!command_state || !command_state->search_interp)
+	return;
+
+    Tcl_DeleteInterp(command_state->search_interp);
+    command_state->search_interp = nullptr;
+}
+
+struct GuiThreadRequest {
+    mged_gui_callback_t callback = nullptr;
+    void *data = nullptr;
+    std::mutex mutex;
+    std::condition_variable completed;
+    bool done = false;
+};
+
+struct GuiThreadEvent {
+    Tcl_Event event;
+    GuiThreadRequest *request;
+};
+
+}
 
 /* No-op wake proc */
 static int
@@ -123,13 +166,62 @@ wake_proc(Tcl_Event* UNUSED(evPtr), int UNUSED(mask))
     return 1;
 }
 
+/* Execute a display-affine callback queued by a GED worker.  Tcl services
+ * this event on the thread that owns the GUI and its graphics contexts. */
+static int
+gui_thread_proc(Tcl_Event *event_ptr, int UNUSED(mask))
+{
+    GuiThreadEvent *event = reinterpret_cast<GuiThreadEvent *>(event_ptr);
+    GuiThreadRequest *request = event->request;
+
+    request->callback(request->data);
+
+    /* Keep the request lock through notification.  The waiting worker cannot
+     * destroy its stack-based request until this event has stopped using it. */
+    std::lock_guard<std::mutex> lock(request->mutex);
+    request->done = true;
+    request->completed.notify_one();
+    return 1;
+}
+
+extern "C" void
+mged_run_on_gui_thread(struct mged_state *s, mged_gui_callback_t callback,
+	void *data)
+{
+    if (!s || !callback)
+	return;
+
+    /* Classic and non-interactive sessions do not have a GUI thread. */
+    if (!s->interactive || s->classic_mged || !s->gui_thread_id ||
+	Tcl_GetCurrentThread() == s->gui_thread_id) {
+	callback(data);
+	return;
+    }
+
+    GuiThreadRequest request;
+    request.callback = callback;
+    request.data = data;
+
+    GuiThreadEvent *event = reinterpret_cast<GuiThreadEvent *>(
+	ckalloc(sizeof(GuiThreadEvent)));
+    event->event.proc = gui_thread_proc;
+    event->request = &request;
+
+    Tcl_ThreadQueueEvent(s->gui_thread_id, reinterpret_cast<Tcl_Event *>(event),
+	TCL_QUEUE_TAIL);
+    Tcl_ThreadAlert(s->gui_thread_id);
+
+    std::unique_lock<std::mutex> lock(request.mutex);
+    request.completed.wait(lock, [&request]() { return request.done; });
+}
+
 /* Internal C++ async helper.
  *
  * In GUI (non-classic, interactive) mode: runs 'func' in a std::thread while
  * the main thread pumps the Tcl event loop so that Tk GUI events stay
  * responsive and the log-drain timer can flush intermediate bu_log output.
- * s->cmd_running is set to 1 for the duration to guard against re-entrant
- * stdin_input dispatches.
+ * s->cmd_running is set to 1 for the duration so the central command
+ * dispatcher can reject re-entrant access to shared GED state.
  *
  * In classic / non-interactive mode: runs 'func' synchronously on the calling
  * thread without pumping the event loop, so that scripted stdin commands
@@ -145,25 +237,44 @@ run_ged_async(struct mged_state *s, std::function<int()> func)
      * command runs would cause stdin_input to fire for the next scripted line
      * while cmd_running==1, dropping it with "command already running".
      * Run synchronously instead so all scripted commands execute in order. */
-    if (s->classic_mged || !s->interactive)
-	return func();
+    if (s->cmd_running) {
+	bu_log("mged: refusing re-entrant GED command execution\n");
+	return BRLCAD_ERROR;
+    }
 
+    AsyncCommandState command_state;
+
+    s->command_state = &command_state;
+    s->cmd_running = 1;
+
+    if (s->classic_mged || !s->interactive) {
+	int command_result = func();
+	delete_search_interp(&command_state);
+	s->command_state = NULL;
+	s->cmd_running = 0;
+	return command_result;
+    }
+
+    Tcl_Obj *saved_result = Tcl_GetObjResult(s->interp);
+    Tcl_IncrRefCount(saved_result);
+    Tcl_ResetResult(s->interp);
     Tcl_ThreadId main_tid = Tcl_GetCurrentThread();
     std::atomic<bool> done{false};
-    std::atomic<int>  result{0};
-
-    s->cmd_running = 1;
+    std::atomic<int> result{0};
 
     /* must suppress SIGINT for the duration of the worker pump. Otherwise,
      * SIGINT would longjmp to the outer frame, skipping worker.join(). SIG_IGN
-     * is just for this window and is be restored after .join()
-     * TODO/FIXME: this should be replaced with an intentional interrupt flag
-     * that can cooperate with callers for graceful handling
+     * is just for this window and is restored after .join().  GUI Control-C
+     * uses the cooperative command-state flag instead of a signal longjmp.
      */
     void (*prev_sigint)(int) = signal(SIGINT, SIG_IGN);
 
     std::thread worker([&]() {
-	result.store(func(), std::memory_order_release);
+	int command_result = func();
+	if (command_state.search_interp)
+	    bu_log("search interp: cleaning up after an incomplete search\n");
+	delete_search_interp(&command_state);
+	result.store(command_result, std::memory_order_release);
 	done.store(true, std::memory_order_release);
 	/* MUST allocate with ckalloc (NOT bu_malloc): Tcl_ServiceEvent
 	 * frees this block via ckfree after wake_proc returns 1 */
@@ -177,7 +288,9 @@ run_ged_async(struct mged_state *s, std::function<int()> func)
      * (Tcl services the event queue before it ever blocks, so there is no
      * lost-wakeup race); log_drain_callback timer is the liveness backstop and
      * continues to stream intermediate bu_log output to the command prompt */
-    while (!done.load(std::memory_order_acquire) && !mged_shutting_down(s)) {
+    /* A worker may be waiting for a GUI-thread callback.  A staged shutdown
+     * must therefore keep servicing events until the worker has completed. */
+    while (!done.load(std::memory_order_acquire)) {
 	Tcl_DoOneEvent(TCL_ALL_EVENTS);
 	mged_pr_output(s->interp);
     }
@@ -190,11 +303,58 @@ run_ged_async(struct mged_state *s, std::function<int()> func)
     /* Join establishes that neither the command nor any worker-side cleanup
      * can append more output before the final drain. */
     mged_pr_output(s->interp);
+    Tcl_SetObjResult(s->interp, saved_result);
+    Tcl_DecrRefCount(saved_result);
+    bool interrupted = command_state.interrupt_requested.load(std::memory_order_acquire);
+    s->command_state = NULL;
     s->cmd_running = 0;
+
+    if (interrupted) {
+	bu_vls_strcpy(s->gedp->ged_result_str, "Command interrupted.");
+	return BRLCAD_ERROR;
+    }
+
     return result.load(std::memory_order_acquire);
 }
 
 extern "C" {
+
+int
+mged_request_command_interrupt(struct mged_state *s)
+{
+    if (!s || !s->cmd_running || !s->command_state)
+	return 0;
+
+    AsyncCommandState *command_state = active_command_state(s);
+    command_state->interrupt_requested.store(true, std::memory_order_release);
+    return 1;
+}
+
+
+int
+mged_command_interrupted(struct mged_state *s)
+{
+    if (!s || !s->command_state)
+	return 0;
+
+    AsyncCommandState *command_state = active_command_state(s);
+    return command_state->interrupt_requested.load(std::memory_order_acquire) ? 1 : 0;
+}
+
+
+int
+cmd_interrupt(ClientData clientData, Tcl_Interp *interpreter, int argc, const char *argv[])
+{
+    struct cmdtab *ctp = (struct cmdtab *)clientData;
+    MGED_CK_CMD(ctp);
+
+    if (argc != 1) {
+	Tcl_AppendResult(interpreter, "Usage: ", argv[0], NULL);
+	return TCL_ERROR;
+    }
+    Tcl_SetObjResult(interpreter, Tcl_NewBooleanObj(mged_request_command_interrupt(ctp->s)));
+    return TCL_OK;
+}
 
 
 /**
@@ -365,7 +525,7 @@ mged_ged_exec_async(struct mged_state *s, int argc, const char *argv[])
 /* All remaining MGED command functions require C linkage because they are
  * called through Tcl command dispatch (function pointers stored with
  * Tcl_CreateCommand) and directly by name from other .c translation units. */
-/* Tcl command "_mged_ged_exec" registered inside search_interp.
+/* Tcl command "_mged_ged_exec" registered inside the search interpreter.
  * Bridges Tcl scripts running in the search interpreter to the GED command
  * system so that GED commands (draw, ls, attr, ...) are reachable from
  * within Tcl scripts executed by search -exec. */
@@ -528,9 +688,7 @@ _capture_search_snapshot(struct mged_state *s)
 }
 
 
-/* Execute a single -exec invocation in the lifecycle-scoped search interpreter.
- * Used by mged_db_search_callback as the normal path when s->search_interp is
- * available (set by mged_search_pre_clbk before the search begins). */
+/* Execute one -exec invocation in the command-owned search interpreter. */
 static int
 _exec_in_search_interp(Tcl_Interp *search_interp, int argc, const char *argv[])
 {
@@ -562,118 +720,100 @@ _exec_in_search_interp(Tcl_Interp *search_interp, int argc, const char *argv[])
 /**
  * PRE-execution callback for the "search" command.
  *
- * For searches which might contain -exec, creates a fresh, lifecycle-scoped
- * secondary Tcl interpreter and stores it in s->search_interp.  This
- * interpreter replays the main-interp snapshot captured by cmd_search and is
- * then reused for every -exec invocation fired by mged_db_search_callback
- * during this search run.  Creating the interpreter here rather than inside
- * each DURING callback avoids repeated snapshot replay.  Searches which
- * cannot contain -exec need neither the snapshot nor this interpreter.
- *
- * A leftover interpreter from a previous search is a thread-ownership error:
- * it cannot safely be deleted by an arbitrary later thread, so fail loudly.
+ * A search with -exec gets one interpreter owned by the active command.  It
+ * is created and destroyed on the command thread, reused for each match, and
+ * never exposed to the GUI thread.  run_ged_async also destroys it if search
+ * exits without invoking the POST callback.
  */
 int
 mged_search_pre_clbk(int argc, const char **argv,
-		     void *UNUSED(u1), void *u2)
+                     void *UNUSED(u1), void *u2)
 {
     struct mged_state *s = (struct mged_state *)u2;
+    AsyncCommandState *command_state = active_command_state(s);
     MGED_CK_STATE(s);
 
-    /* Clean up any leftover interp from a previous search that did not finish
-     * cleanly (i.e. where the POST callback was not reached). */
-    if (s->search_interp != NULL)
-	bu_bomb("ERROR - stale search interp, state is corrupted\n");
+    if (!command_state) {
+	bu_log("search interp: no active command state\n");
+	return BRLCAD_ERROR;
+    }
+
+    if (command_state->search_interp) {
+	bu_log("search interp: discarding an unexpected interpreter\n");
+	delete_search_interp(command_state);
+    }
 
     if (!_search_may_exec(argc, argv))
 	return BRLCAD_OK;
 
-    s->search_interp = _create_search_interp(s);
-    return BRLCAD_OK;
+    command_state->search_interp = _create_search_interp(s);
+    return command_state->search_interp ? BRLCAD_OK : BRLCAD_ERROR;
 }
 
 
 /**
  * POST-execution callback for the "search" command.
  *
- * For a search which might contain -exec, destroys the lifecycle-scoped
- * interpreter created by mged_search_pre_clbk.  The interpreter must not be
- * persisted beyond a single search invocation because the user environment
- * (procs, variables) may change before the next search is run.  Other searches
- * deliberately have no search interpreter to destroy.
- *
- * We deliberately run this after every search, succeed or fail,
- * to make sure we get rid of the thread-owned Tcl interp - it must be
- * destroyed from this thread.
+ * Destroy the command-owned interpreter on the thread that created it.
  */
 int
 mged_search_post_clbk(int argc, const char **argv,
-		      void *UNUSED(u1), void *u2)
+                      void *UNUSED(u1), void *u2)
 {
     struct mged_state *s = (struct mged_state *)u2;
+    AsyncCommandState *command_state = active_command_state(s);
     MGED_CK_STATE(s);
 
+    if (!command_state) {
+	bu_log("search interp: no active command state during cleanup\n");
+	return BRLCAD_ERROR;
+    }
+
     if (!_search_may_exec(argc, argv)) {
-	if (s->search_interp != NULL)
-	    bu_bomb("ERROR - unexpected search Tcl interp, state is corrupted.\n");
+	if (command_state->search_interp) {
+	    bu_log("search interp: discarding an unexpected interpreter\n");
+	    delete_search_interp(command_state);
+	    return BRLCAD_ERROR;
+	}
 	return BRLCAD_OK;
     }
 
-    if (s->search_interp == NULL)
-	bu_bomb("ERROR - search Tcl interp missing, state is corrupted.\n");
+    if (!command_state->search_interp) {
+	bu_log("search interp: execution interpreter was not created\n");
+	return BRLCAD_ERROR;
+    }
 
-    Tcl_DeleteInterp(s->search_interp);
-    s->search_interp = NULL;
+    delete_search_interp(command_state);
     return BRLCAD_OK;
 }
 
 
 /**
- * NOTE:  Per Tcl (https://www.tcl.tk/doc/howto/thread_model.html) "errors will
- * occur if you let more than one thread call into the same interpreter (e.g.,
- * with Tcl_Eval)."  In MGED's run_ged_async threading model the main thread
- * pumps the Tcl event loop while a worker thread runs the search command.
- * Using the main GUI interpreter (s->interp) from the worker thread is
- * therefore unsafe.
+ * Evaluate a search -exec command without crossing Tcl thread ownership.
  *
- * This callback uses s->search_interp — a secondary, fully independent Tcl
- * interpreter whose lifetime is scoped to the enclosing search command.  It is
- * created by mged_search_pre_clbk (fired before a search which might contain
- * -exec begins), reused across all -exec invocations, and destroyed by
- * mged_search_post_clbk (fired after search completes).  The main thread never
- * touches search_interp while a search is running, so there is no concurrent
- * interpreter access and Tcl's single-thread-per-interp requirement is
- * satisfied.
+ * In interactive MGED the main thread pumps events while the search runs on
+ * a worker.  Tcl interpreters may only be used by their owning thread, so the
+ * active command owns a secondary interpreter created on the worker.  Its
+ * custom unknown command forwards GED operations through _mged_ged_exec.
+ * Display callbacks are separately marshalled to the GUI thread.
  *
- * A custom 'unknown' proc inside search_interp bridges any command that Tcl
- * does not recognise to ged_exec via _mged_ged_exec, so all GED commands
- * (draw, ls, attr, ...) are callable directly by name from Tcl scripts.  The
- * _mged_ged_exec handler suppresses ged_skip_clbks so GUI-refresh and other
- * side-effect hooks are silenced for the duration of each sub-command.
- *
- * GUI and display commands will fail inside search_interp, which is expected —
- * those operations are not reliable from a search -exec context in any case.
- *
- * GLOBALS NOTE: libtclcad has two relevant process-wide globals:
- *  - current_top: set only by to_cmd(), which is only dispatched for tclcad
- *    GED objects created via go_open.  search_interp has no such objects, so
- *    current_top is never written from the worker thread.
- *  - HeadTclcadObj: modified only by to_open_tcl() / to_deleteProc().
- *    search_interp never calls go_open, so this list is untouched.
- * Both globals are therefore safe with a secondary interpreter active.
- *
- * If s->search_interp is NULL (e.g. init failed in the PRE callback, or the
- * PRE callback was not registered), the callback falls back to a plain
- * ged_exec so GED commands still work.
+ * The secondary interpreter is initialized with Tcl only. It creates no GED
+ * object and therefore cannot replace libtclcad interpreter-local state. If
+ * initialization is unavailable, use a temporary interpreter and finally a
+ * direct GED call so -exec retains its historical fallback behavior.
  */
 int
 mged_db_search_callback(int argc, const char *argv[], void *UNUSED(u1), void *u2)
 {
     struct mged_state *s = (struct mged_state *)u2;
+    AsyncCommandState *command_state = active_command_state(s);
     MGED_CK_STATE(s);
 
-    if (s->search_interp)
-	return _exec_in_search_interp(s->search_interp, argc, argv);
+    if (mged_command_interrupted(s))
+	return 0;
+
+    if (command_state && command_state->search_interp)
+	return _exec_in_search_interp(command_state->search_interp, argc, argv);
 
     // Fallback path: no lifecycle-scoped interp available (either init failed
     // in mged_search_pre_clbk, or the PRE callback was not registered).
@@ -700,44 +840,53 @@ mged_db_search_callback(int argc, const char *argv[], void *UNUSED(u1), void *u2
     return ret == BRLCAD_OK;
 }
 
+struct CloneProgressData {
+    Tcl_Interp *interp;
+    const char *current;
+    const char *total;
+};
+
+
+static void
+mged_clone_progress_on_gui_thread(void *data_ptr)
+{
+    CloneProgressData *data = static_cast<CloneProgressData *>(data_ptr);
+    Tcl_Obj *prefix = Tcl_GetVar2Ex(data->interp, "clone_progress_callback",
+	    NULL, TCL_GLOBAL_ONLY);
+    if (!prefix)
+	return;
+
+    Tcl_Obj *command = Tcl_DuplicateObj(prefix);
+    Tcl_IncrRefCount(command);
+    Tcl_ListObjAppendElement(data->interp, command,
+	    Tcl_NewStringObj(data->current, -1));
+    Tcl_ListObjAppendElement(data->interp, command,
+	    Tcl_NewStringObj(data->total, -1));
+    if (Tcl_EvalObjEx(data->interp, command, TCL_EVAL_GLOBAL) != TCL_OK) {
+	bu_log("clone progress callback failed: %s\n",
+		Tcl_GetStringResult(data->interp));
+    }
+    Tcl_DecrRefCount(command);
+    Tcl_ResetResult(data->interp);
+}
+
+
 int
 mged_clone_during_callback(int argc, const char **argv,
 			   void *UNUSED(u1), void *u2)
 {
-    struct mged_state *s = (struct mged_state *)u2;
+    struct mged_state *s = static_cast<struct mged_state *>(u2);
     MGED_CK_STATE(s);
-    Tcl_Interp *interp = s->interp;
 
-    /* Evaluate the Tcl command stored in the interpreter global variable
-     * "clone_progress_callback", if any.  Tcl GUIs (e.g. pattern_gui)
-     * can set this variable to a command prefix before invoking clone,
-     * and unset it afterwards:
-     *
-     *   set clone_progress_callback [list my_proc $widget]
-     *   clone ...
-     *   unset -nocomplain clone_progress_callback
-     *
-     * The C callback appends the current clone count (argv[2]) and the
-     * total expected clone count (argv[3]) as additional arguments, so
-     * the Tcl proc receives: my_proc $widget $current $total
-     */
-    const char *cmd = Tcl_GetVar(interp, "clone_progress_callback",
-				 TCL_GLOBAL_ONLY);
-    if (!cmd || !cmd[0])
-	return 1;
-
-    /* argv: {"step", name, current_str, total_str} */
-    const char *current_str = (argc >= 3) ? argv[2] : "0";
-    const char *total_str   = (argc >= 4) ? argv[3] : "0";
-
-    Tcl_DString script;
-    Tcl_DStringInit(&script);
-    Tcl_DStringAppend(&script, cmd, -1);
-    Tcl_DStringAppendElement(&script, current_str);
-    Tcl_DStringAppendElement(&script, total_str);
-    Tcl_Eval(interp, Tcl_DStringValue(&script));
-    Tcl_DStringFree(&script);
-    Tcl_ResetResult(interp);
+    /* Clone runs on a GED worker in interactive MGED.  Tcl interpreters and
+     * Tk widgets are thread-affine, so evaluating the optional progress
+     * command must be marshalled back to the GUI thread. */
+    CloneProgressData data = {
+	s->interp,
+	(argc >= 3) ? argv[2] : "0",
+	(argc >= 4) ? argv[3] : "0"
+    };
+    mged_run_on_gui_thread(s, mged_clone_progress_on_gui_thread, &data);
 
     return 1;
 }
@@ -948,7 +1097,9 @@ cmd_ged_gqa(ClientData clientData, Tcl_Interp *interpreter, int argc, const char
     static const char *gqa_options = "A:a:de:f:g:Gn:N:p:P:qrS:t:U:u:vV:W:h?";
     char **vp;
     int i;
+    int option;
     int ret;
+    bool plot_in_view = false;
     struct cmdtab *ctp = (struct cmdtab *)clientData;
     MGED_CK_CMD(ctp);
     struct mged_state *s = ctp->s;
@@ -972,8 +1123,10 @@ cmd_ged_gqa(ClientData clientData, Tcl_Interp *interpreter, int argc, const char
     int saved_optind = bu_optind;
     bu_opterr = 0;
     bu_optind = 1;
-    while (bu_getopt(argc, (char * const *)argv, gqa_options) != -1)
-	;
+    while ((option = bu_getopt(argc, (char * const *)argv, gqa_options)) != -1) {
+	if (option == 'A' && bu_optarg && strchr(bu_optarg, 'p'))
+	    plot_in_view = true;
+    }
     i = bu_optind;
     bu_optarg = saved_optarg;
     bu_opterr = saved_opterr;
@@ -1004,7 +1157,13 @@ cmd_ged_gqa(ClientData clientData, Tcl_Interp *interpreter, int argc, const char
 	gd_rt_cmd_len += ged_who_argv(s->gedp, vp, (const char **)&gd_rt_cmd[args]);
     }
 
-    ret = run_ged_async(s, [&]() -> int { return (*ctp->ged_func)(s->gedp, gd_rt_cmd_len, (const char **)gd_rt_cmd); });
+    /* In-view plotting creates display objects and invokes MGED's display
+     * manager callbacks.  Keep that work on the GUI thread while preserving
+     * asynchronous execution for analyses that only produce reports/files. */
+    if (plot_in_view)
+	ret = (*ctp->ged_func)(s->gedp, gd_rt_cmd_len, (const char **)gd_rt_cmd);
+    else
+	ret = run_ged_async(s, [&]() -> int { return (*ctp->ged_func)(s->gedp, gd_rt_cmd_len, (const char **)gd_rt_cmd); });
     GED_OUTPUT;
 
     bu_free(gd_rt_cmd, "free gd_rt_cmd");
@@ -2268,7 +2427,7 @@ f_postscript(ClientData clientData, Tcl_Interp *interpreter, int argc, const cha
 
     dml = s->mged_curr_dm;
     s->gedp->ged_gvp = view_state->vs_gvp;
-    status = mged_attach(s, "postscript", argc, argv);
+    status = mged_attach(s, "ps", argc, argv);
     if (status == TCL_ERROR)
 	return TCL_ERROR;
 

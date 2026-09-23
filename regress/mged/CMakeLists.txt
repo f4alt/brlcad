@@ -18,6 +18,7 @@ set(
   cp.mged
   draw_e_erase_d_who.mged
   draw.mged
+  edgedir.mged
   erase.mged
   exists.mged
   extrude.mged
@@ -45,6 +46,7 @@ set(
   prim_edit.mged
   orot.mged
   oscale.mged
+  overlap_plotting.mged
   overlay.mged
   permute.mged
   plot.mged
@@ -83,6 +85,10 @@ set(
   zoom.mged
 )
 
+if (BRLCAD_ENABLE_TK)
+  list(APPEND MGED_TESTS csg_edit.mged)
+endif()
+
 set(TSCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/regress-mged.cmake.in")
 
 if(TARGET mged)
@@ -110,19 +116,42 @@ if(TARGET mged)
     set(TEST_DB "")
     set(TEST_EXPECT "")
     set(TEST_REJECT "")
+    set(TEST_SOURCE "")
     set(TEST_DEPS "mged;rtarea;rt;rtcheck")
+    set(TEST_TIMEOUT 300)
     if(TNAME STREQUAL "search_exec")
       set(TEST_DB "${CMAKE_BINARY_DIR}/${DATA_DIR}/db/m35.g")
       set(TEST_EXPECT "PASS search -exec sourced Tcl state")
       list(APPEND TEST_DEPS "m35.g")
+    elseif(TNAME STREQUAL "arb")
+      set(TEST_EXPECT "'arb' testing completed")
+      set(TEST_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/regress_${testfile}")
     elseif(TNAME STREQUAL "killtree")
       set(TEST_EXPECT "KILL Solid:  killtree_dup.s")
       set(TEST_REJECT "db_lookup(killtree_dup.s) failed")
     elseif(TNAME STREQUAL "oed")
       set(TEST_EXPECT "PASS oed one-path bounding-box keypoint")
+    elseif(TNAME STREQUAL "csg_edit")
+      set(TEST_EXPECT "PASS: broad MGED CSG edit coverage completed")
+      set(TEST_REJECT "FAIL:;rt_arb_edit:;rt_edit_knobs_tra:;Incorrect edit flag")
+      set(TEST_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/regress_${testfile}")
+    elseif(TNAME STREQUAL "prim_edit")
+      set(TEST_EXPECT "Primitive parameter editing testing completed")
+      set(TEST_REJECT "FAIL:")
+    elseif(TNAME STREQUAL "overlap_plotting")
+      set(TEST_DB "${CMAKE_SOURCE_DIR}/src/libged/tests/ged_tests.g")
+      set(TEST_EXPECT "PASS overlap plotting")
+      set(TEST_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/regress_${testfile}")
+      set(TEST_TIMEOUT 20)
     endif()
 
-    brlcad_regression_test(regress-mged_${TNAME} "${TEST_DEPS}" TEST_SCRIPT "${TSCRIPT}" EXEC mged)
+    brlcad_regression_test(
+      regress-mged_${TNAME}
+      "${TEST_DEPS}"
+      TEST_SCRIPT "${TSCRIPT}"
+      TIMEOUT "${TEST_TIMEOUT}"
+      EXEC mged
+    )
     distclean("${LOG_FILE}")
   endforeach(testfile ${MGED_TESTS})
 
@@ -142,8 +171,14 @@ cmakefiles(
 set(
   mged_outfiles
   mged.g
+  mged_gqa_cleared.plot3
+  mged_gqa_overlaps.plot3
+  mged_overlap_baseline.plot3
   mged.log
   mged_plot_test.plot3
+  mged_rtcheck_overlaps.plot3
+  csg_edit_data.bin
+  csg_edit_dsp.bin
   mged_saveview_test.rt
 )
 
@@ -152,6 +187,7 @@ distclean(${mged_outfiles})
 
 cmakefiles(
   CMakeLists.txt
+  csg_edit.mged
   mged.tcl
   regression_resources.tcl
   search_exec_procs.tcl

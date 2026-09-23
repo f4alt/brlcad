@@ -105,7 +105,7 @@ set(
   sat.cpp
   spsr.cpp
   tri_pt.cpp
-  tri_ray.c
+  tri_ray.cpp
   tri_tri.c
   trimesh.cpp
   trimesh_diff.cpp
@@ -113,6 +113,7 @@ set(
   trimesh_plot3.cpp
   trimesh_repair.cpp
   trimesh_remesh.cpp
+  trimesh_self_isect.cpp
   trimesh_sync.cpp
   trimesh_split.cpp
   vert_tree.c

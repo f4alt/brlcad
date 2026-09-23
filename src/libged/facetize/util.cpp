@@ -25,7 +25,6 @@
 
 #include "common.h"
 
-#include <cmath>
 #include <string.h>
 
 #include <iostream>
@@ -35,12 +34,17 @@
 #include "bu/path.h"
 #include "bu/ptbl.h"
 #include "rt/search.h"
-#include "rt/calc.h"
 #include "rt/db_instance.h"
 #include "rt/primitives/bot.h"
 #include "wdb.h"
 #include "../ged_private.h"
 #include "./ged_facetize.h"
+#include "./validation.h"
+
+static const size_t FACETIZE_TERMINAL_DETAIL_LIMIT = 10u;
+static const char FACETIZE_LOG_EXTENSION[] = ".log";
+static const char FACETIZE_INSPECTION_LOG_SUFFIX[] = "-regions-to-inspect.log";
+static const char FACETIZE_TOLERATED_FAILURE_LOG_SUFFIX[] = "-tolerated-failures.log";
 
 void
 facetize_log(struct _ged_facetize_state *s, int msg_level, const char *fmt, ...)
@@ -122,7 +126,7 @@ facetize_tolerated_failure(struct _ged_facetize_state *s, const char *fmt, ...)
     }
 
     if (s->tolerated_failure_log) {
-	bu_vls_printf(s->tolerated_failure_log, "  - %s\n", bu_vls_cstr(&detail));
+	bu_vls_printf(s->tolerated_failure_log, "      - %s\n", bu_vls_cstr(&detail));
 	s->tolerated_failure_details++;
     } else {
 	s->tolerated_failure_omitted++;
@@ -131,23 +135,143 @@ facetize_tolerated_failure(struct _ged_facetize_state *s, const char *fmt, ...)
     bu_vls_free(&detail);
 }
 
-void
-facetize_tolerated_summary(struct _ged_facetize_state *s)
+static size_t
+facetize_detail_line_count(const struct bu_vls *details)
 {
-    if (!s || !s->tolerate_failures || s->tolerated_failures <= 0)
+    if (!details || !bu_vls_strlen(details))
+	return 0;
+
+    const char *detail_text = bu_vls_cstr(details);
+    size_t detail_length = bu_vls_strlen(details);
+    size_t line_count = 0;
+    for (size_t i = 0; i < detail_length; i++) {
+	if (detail_text[i] == '\n')
+	    line_count++;
+    }
+    if (detail_text[detail_length - 1] != '\n')
+	line_count++;
+    return line_count;
+}
+
+static void
+facetize_detail_log_path(struct bu_vls *path,
+	const struct _ged_facetize_state *s, const char *suffix)
+{
+    if (!path || !s || !suffix)
 	return;
 
-    facetize_log(s, 0, "\nFACETIZE WARNING: --tolerate-failures generated partial output; %d component failure(s) were omitted from the result.\n", s->tolerated_failures);
-    facetize_log(s, 0, "Output is not a complete representation of the input.  Re-run without --tolerate-failures to stop at the first failure.\n");
+    struct bu_vls log_basename = BU_VLS_INIT_ZERO;
+    const char *main_log = "facetize";
+    if (s->log_file && bu_vls_strlen(s->log_file)) {
+	main_log = bu_vls_cstr(s->log_file);
+	if (s->log_file_is_temporary &&
+		bu_path_component(&log_basename, main_log, BU_PATH_BASENAME))
+	    main_log = bu_vls_cstr(&log_basename);
+    }
+    bu_vls_sprintf(path, "%s", main_log);
+    size_t path_length = bu_vls_strlen(path);
+    const size_t extension_length = sizeof(FACETIZE_LOG_EXTENSION) - 1;
+    if (path_length >= extension_length &&
+	    BU_STR_EQUAL(bu_vls_cstr(path) + path_length - extension_length,
+		    FACETIZE_LOG_EXTENSION))
+	bu_vls_trunc(path, -(int)extension_length);
+    bu_vls_strcat(path, suffix);
+    bu_vls_free(&log_basename);
+}
 
-    if (s->tolerated_failure_log && bu_vls_strlen(s->tolerated_failure_log)) {
-	facetize_log(s, 0, "\nTolerated failure details:\n%s", bu_vls_cstr(s->tolerated_failure_log));
+static bool
+facetize_write_detail_log(const struct bu_vls *path, const char *title,
+	size_t detail_count, const struct bu_vls *details)
+{
+    if (!path || !bu_vls_strlen(path) || !title || !details)
+	return false;
+
+    std::ofstream detail_file(bu_vls_cstr(path),
+	    std::ios::out | std::ios::trunc);
+    if (!detail_file)
+	return false;
+
+    detail_file << title << " (" << detail_count << ")\n\n"
+	<< bu_vls_cstr(details);
+    detail_file.close();
+    return detail_file.good();
+}
+
+static void
+facetize_report_details(struct _ged_facetize_state *s, const char *label,
+	size_t detail_count, const struct bu_vls *details, const char *log_suffix)
+{
+    if (!s || !label || !detail_count || !details ||
+	    !bu_vls_strlen(details) || !log_suffix)
+	return;
+
+    if (facetize_detail_line_count(details) <= FACETIZE_TERMINAL_DETAIL_LIMIT) {
+	facetize_log(s, 0, "\n    %s:\n%s", label, bu_vls_cstr(details));
+	return;
     }
 
-    if (s->tolerated_failure_omitted > 0) {
-	facetize_log(s, 0, "  ... %d additional tolerated failure(s) omitted from this summary; see %s for full context.\n",
-		s->tolerated_failure_omitted,
-		(s->log_file && bu_vls_strlen(s->log_file)) ? bu_vls_cstr(s->log_file) : "the facetize log");
+    struct bu_vls detail_path = BU_VLS_INIT_ZERO;
+    facetize_detail_log_path(&detail_path, s, log_suffix);
+    if (facetize_write_detail_log(&detail_path, label, detail_count, details)) {
+	facetize_log(s, 0, "\n    %s:\n", label);
+	facetize_log(s, 0, "      Complete list written to %s\n",
+		bu_vls_cstr(&detail_path));
+    } else {
+	/* Preserve the details if the dedicated file cannot be created. */
+	facetize_log(s, 0, "\n    %s:\n", label);
+	facetize_log(s, 0,
+		"      Unable to write %s; complete list follows:\n%s",
+		bu_vls_cstr(&detail_path), bu_vls_cstr(details));
+    }
+    bu_vls_free(&detail_path);
+}
+
+void
+facetize_summary(struct _ged_facetize_state *s)
+{
+    if (!s)
+	return;
+
+    bool have_region_summary = s->region_summary &&
+	bu_vls_strlen(s->region_summary);
+    bool have_primitive_summary = s->primitive_summary &&
+	bu_vls_strlen(s->primitive_summary);
+    bool have_tolerated_failures = s->tolerate_failures &&
+	s->tolerated_failures > 0;
+    if (!have_region_summary && !have_primitive_summary &&
+	    !have_tolerated_failures)
+	return;
+
+    facetize_log(s, 0, "\nFACETIZE summary:\n");
+    if (have_region_summary)
+	facetize_log(s, 0, "%s", bu_vls_cstr(s->region_summary));
+    if (s->inspection_regions > 0)
+	facetize_report_details(s, "Regions to inspect manually",
+		s->inspection_regions, s->inspection_log,
+		FACETIZE_INSPECTION_LOG_SUFFIX);
+
+    if (have_primitive_summary)
+	facetize_log(s, 0, "%s", bu_vls_cstr(s->primitive_summary));
+
+    if (have_tolerated_failures) {
+	facetize_log(s, 0, "\n  Tolerated failures:\n");
+	facetize_log(s, 0, "    %-43s %8d\n", "Components omitted",
+		s->tolerated_failures);
+	facetize_log(s, 0,
+		"    WARNING: output is partial and does not completely represent the input.\n");
+	facetize_log(s, 0,
+		"    Re-run without --tolerate-failures to stop at the first failure.\n");
+	if (s->tolerated_failure_details > 0)
+	    facetize_report_details(s, "Tolerated failure details",
+		    (size_t)s->tolerated_failure_details,
+		    s->tolerated_failure_log,
+		    FACETIZE_TOLERATED_FAILURE_LOG_SUFFIX);
+	if (s->tolerated_failure_omitted > 0)
+	    facetize_log(s, 0,
+		    "    %d additional failure detail(s) unavailable; see %s for context.\n",
+		    s->tolerated_failure_omitted,
+		    (s->log_file && bu_vls_strlen(s->log_file)) ?
+		    bu_vls_cstr(s->log_file) : "the facetize log");
     }
 }
 
@@ -157,72 +281,6 @@ _db_uniq_test(struct bu_vls *n, void *data)
     struct db_i *dbip = (struct db_i *)data;
     if (db_lookup(dbip, bu_vls_addr(n), LOOKUP_QUIET) == RT_DIR_NULL) return 1;
     return 0;
-}
-
-int
-_ged_facetize_csg_bbox(struct db_i *dbip, const char *obj_name, point_t rpp_min, point_t rpp_max)
-{
-    if (!dbip || !obj_name || !rpp_min || !rpp_max)
-	return BRLCAD_ERROR;
-
-    struct directory *dp = db_lookup(dbip, obj_name, LOOKUP_QUIET);
-    if (dp == RT_DIR_NULL)
-	return BRLCAD_ERROR;
-
-    if (rt_bound_internal(dbip, dp, rpp_min, rpp_max) != 0)
-	return BRLCAD_ERROR;
-
-    vect_t d;
-    VSUB2(d, rpp_max, rpp_min);
-    if (d[X] <= 0.0 || d[Y] <= 0.0 || d[Z] <= 0.0)
-	return BRLCAD_ERROR;
-
-    for (int i = 0; i < 3; i++) {
-	if (!std::isfinite(rpp_min[i]) || !std::isfinite(rpp_max[i]))
-	    return BRLCAD_ERROR;
-    }
-
-    return BRLCAD_OK;
-}
-
-int
-_ged_validate_objs_list(struct _ged_facetize_state *s, int argc, const char *argv[], int newobj_cnt)
-{
-    int i;
-    struct ged *gedp = s->gedp;
-
-    if (s->in_place && newobj_cnt) {
-	bu_vls_printf(gedp->ged_result_str, "In place conversion specified, but object list includes objects that do not exist:\n");
-	for (i = argc - newobj_cnt; i < argc; i++) {
-	    bu_vls_printf(gedp->ged_result_str, "       %s\n", argv[i]);
-	}
-	bu_vls_printf(gedp->ged_result_str, "\nAborting.  When performing an in-place facetization, a single pre-existing object must be specified.\n");
-	return BRLCAD_ERROR;
-
-    }
-
-    if (!s->in_place) {
-	if (newobj_cnt < 1) {
-	    bu_vls_printf(gedp->ged_result_str, "all objects listed already exist, aborting.  (Need new object name to write out results to.)\n");
-	    return BRLCAD_ERROR;
-	}
-
-	if (newobj_cnt > 1) {
-	    bu_vls_printf(gedp->ged_result_str, "More than one object listed does not exist:\n");
-	    for (i = argc - newobj_cnt; i < argc; i++) {
-		bu_vls_printf(gedp->ged_result_str, "   %s\n", argv[i]);
-	    }
-	    bu_vls_printf(gedp->ged_result_str, "\nAborting.  Need to specify exactly one object name that does not exist to hold facetization output.\n");
-	    return BRLCAD_ERROR;
-	}
-
-	if (argc - newobj_cnt == 0) {
-	    bu_vls_printf(gedp->ged_result_str, "No existing objects specified, nothing to facetize.  Aborting.\n");
-	    return BRLCAD_ERROR;
-	}
-    }
-
-    return BRLCAD_OK;
 }
 
 int
@@ -238,6 +296,21 @@ _ged_facetize_write_bot(struct db_i *dbip, struct rt_bot_internal *bot, const ch
 
     bu_avs_init_empty(&intern.idb_avs);
     (void)bu_avs_add(&intern.idb_avs, "facetized", "1");
+
+    /* In-memory databases do not have the file allocator used by
+     * rt_db_put_internal.  Route them through their dedicated writer so
+     * isolated workers can finish evaluation before announcing a staged
+     * disk write to the parent. */
+    if (!dbip->dbi_filename) {
+	struct rt_wdb *wdbp = wdb_dbopen(dbip, RT_WDB_TYPE_DB_INMEM);
+	if (!wdbp || wdb_put_internal(wdbp, name, &intern, 1.0) < 0) {
+	    if (verbosity >= 0)
+		bu_log("Failed to write %s to in-memory database\n", name);
+	    rt_db_free_internal(&intern);
+	    return BRLCAD_ERROR;
+	}
+	return BRLCAD_OK;
+    }
 
     struct directory *dp = db_diradd(dbip, name, RT_DIR_PHONY_ADDR, 0, RT_DIR_SOLID, (void *)&intern.idb_type);
     if (dp == RT_DIR_NULL) {
@@ -459,8 +532,20 @@ bot_fixup(struct _ged_facetize_state *s, struct db_i *wdbip, struct directory *b
 
     // Have faces, test with raytracer
     struct rt_i *rtip = rt_i_create(wdbip);
-    rt_gettree(rtip, bname);
-    rt_prep(rtip);
+    struct bu_hook_list saved_hooks = BU_HOOK_LIST_INIT_ZERO;
+    facetize_log_hooks_silence(&saved_hooks);
+    int prep_status = rt_gettree(rtip, bname);
+    if (prep_status == 0)
+	rt_prep(rtip);
+    facetize_log_hooks_restore(&saved_hooks);
+
+    if (prep_status != 0 || !rtip->stats.nsolids || !rtip->stats.nregions) {
+	facetize_log(s, 2, "\t%s: raytrace preparation failed; retaining original manifold result.\n", bname);
+	rt_i_destroy(rtip);
+	rt_db_free_internal(&bot_intern);
+	return NULL;
+    }
+
     facetize_log(s, 2, "\t%s: raytrace preparation complete; scanning %zu faces...\n", bname, bot->num_faces);
     struct bu_ptbl tfaces = BU_PTBL_INIT_ZERO;
     int have_thin_faces = rt_bot_thin_check(&tfaces, bot, rtip, VUNITIZE_TOL, 0);
@@ -590,56 +675,59 @@ bot_fixup(struct _ged_facetize_state *s, struct db_i *wdbip, struct directory *b
 }
 
 void
-facetize_primitives_summary(struct _ged_facetize_state *s)
+facetize_collect_primitive_summary(struct _ged_facetize_state *s)
 {
-    if (!s)
+    if (!s || !s->primitive_summary)
 	return;
 
     struct db_i *dbip = s->dbip;
+    bu_vls_trunc(s->primitive_summary, 0);
 
-    facetize_log(s, 0, "\nPrimitive tessellation summary:\n");
     std::map<std::string, std::set<std::string>> method_sets;
     std::map<std::string, std::set<std::string>>::iterator m_it;
     std::set<std::string>::iterator s_it;
     struct db_i *cdbip = db_open(bu_vls_cstr(s->wfile), DB_OPEN_READONLY);
-    if (cdbip) {
-	db_dirbuild(cdbip);
-	db_update_nref(cdbip);
-	method_scan(&method_sets, cdbip);
-	size_t total = 0;
-	size_t fail_cnt = 0;
-	size_t repair_cnt = 0;
-	size_t plate_cnt = 0;
-	for (m_it = method_sets.begin(); m_it != method_sets.end(); ++m_it) {
-	    total += m_it->second.size();
-	    if (m_it->first == std::string("FAIL")) fail_cnt += m_it->second.size();
-	    if (m_it->first == std::string("REPAIR")) repair_cnt += m_it->second.size();
-	    if (m_it->first == std::string("PLATE")) plate_cnt += m_it->second.size();
+    if (!cdbip)
+	return;
+
+    bu_vls_printf(s->primitive_summary, "\n  Primitive tessellation:\n");
+    db_dirbuild(cdbip);
+    db_update_nref(cdbip);
+    method_scan(&method_sets, cdbip);
+    size_t total = 0;
+    size_t fail_cnt = 0;
+    size_t repair_cnt = 0;
+    size_t plate_cnt = 0;
+    for (m_it = method_sets.begin(); m_it != method_sets.end(); ++m_it) {
+	total += m_it->second.size();
+	if (m_it->first == std::string("FAIL")) fail_cnt += m_it->second.size();
+	if (m_it->first == std::string("REPAIR")) repair_cnt += m_it->second.size();
+	if (m_it->first == std::string("PLATE")) plate_cnt += m_it->second.size();
+    }
+    bu_vls_printf(s->primitive_summary, "    %-43s %8zu\n", "Total solids evaluated", total);
+    bu_vls_printf(s->primitive_summary, "    %-43s %8zu\n", "Failed tessellation", fail_cnt);
+    bu_vls_printf(s->primitive_summary, "    %-43s %8zu\n", "Plate extrusions", plate_cnt);
+    bu_vls_printf(s->primitive_summary, "    %-43s %8zu\n", "BoT repair closures", repair_cnt);
+    bu_vls_printf(s->primitive_summary, "\n    Method breakdown:\n");
+    for (m_it = method_sets.begin(); m_it != method_sets.end(); ++m_it) {
+	if (m_it->first == std::string("REPAIR")) {
+	    bu_vls_printf(s->primitive_summary, "      %-41s %8zu\n", "bot repair", m_it->second.size());
+	} else if (m_it->first == std::string("PLATE")) {
+	    bu_vls_printf(s->primitive_summary, "      %-41s %8zu\n", "plate extrusion", m_it->second.size());
+	} else if (m_it->first == std::string("FAIL")) {
+	    bu_vls_printf(s->primitive_summary, "      %-41s %8zu\n", "failed", m_it->second.size());
+	} else {
+	    std::string mlabel = std::string("success: ") + m_it->first;
+	    bu_vls_printf(s->primitive_summary, "      %-41s %8zu\n", mlabel.c_str(), m_it->second.size());
 	}
-	facetize_log(s, 0, "  %-33s %8zu\n", "Total solids evaluated", total);
-	facetize_log(s, 0, "  %-33s %8zu\n", "Failed tessellation", fail_cnt);
-	facetize_log(s, 0, "  %-33s %8zu\n", "Plate extrusions", plate_cnt);
-	facetize_log(s, 0, "  %-33s %8zu\n", "BoT repair closures", repair_cnt);
-	facetize_log(s, 0, "\n  Method breakdown:\n");
-	for (m_it = method_sets.begin(); m_it != method_sets.end(); ++m_it) {
-	    if (m_it->first == std::string("REPAIR")) {
-		facetize_log(s, 0, "    %-28s %8zu\n", "bot repair", m_it->second.size());
-	    } else if (m_it->first == std::string("PLATE")) {
-		facetize_log(s, 0, "    %-28s %8zu\n", "plate extrusion", m_it->second.size());
-	    } else if (m_it->first == std::string("FAIL")) {
-		facetize_log(s, 0, "    %-28s %8zu\n", "failed", m_it->second.size());
-	    } else {
-		std::string mlabel = std::string("success: ") + m_it->first;
-		facetize_log(s, 0, "    %-28s %8zu\n", mlabel.c_str(), m_it->second.size());
-	    }
-	    if (s->verbosity > 1) {
-		// If we used NMG to facetize, that's considered normal - don't
-		// bother listing those primitives
-		if (m_it->first == std::string("NMG"))
-		    continue;
-		for (s_it = m_it->second.begin(); s_it != m_it->second.end(); ++s_it) {
-		    facetize_log(s, 1, "\t%s\n", (*s_it).c_str());
-		}
+	if (s->verbosity > 1) {
+	    // If we used NMG to facetize, that's considered normal - don't
+	    // bother listing those primitives
+	    if (m_it->first == std::string("NMG"))
+		continue;
+	    for (s_it = m_it->second.begin(); s_it != m_it->second.end(); ++s_it) {
+		bu_vls_printf(s->primitive_summary, "        %s\n",
+			s_it->c_str());
 	    }
 	}
     }

@@ -44,6 +44,18 @@ rel_err(double estimated, double exact)
 
 
 static int
+crofton_segments_equal(const struct rt_crofton_segment *left,
+		       const struct rt_crofton_segment *right)
+{
+    return left->ray_id == right->ray_id &&
+	NEAR_EQUAL(left->thickness, right->thickness, SMALL_FASTF) &&
+	VNEAR_EQUAL(left->in_point, right->in_point, SMALL_FASTF) &&
+	VNEAR_EQUAL(left->in_normal, right->in_normal, SMALL_FASTF) &&
+	VNEAR_EQUAL(left->out_point, right->out_point, SMALL_FASTF) &&
+	VNEAR_EQUAL(left->out_normal, right->out_normal, SMALL_FASTF);
+}
+
+static int
 verify_crofton_estimates(void)
 {
     int failures = 0;
@@ -89,6 +101,81 @@ verify_crofton_estimates(void)
 	double analytic_sa  = 4.0 * M_PI * 10.0 * 10.0;
 	double analytic_vol = (4.0 / 3.0) * M_PI * 10.0 * 10.0 * 10.0;
 	CROFTON_CHECK("sphere r=10", &ip, analytic_sa, analytic_vol);
+    }
+
+    {
+	const double full_height = 20.0;
+	const double major_radius = 5.0;
+	const double minor_radius = 3.0;
+	const double neck_base_ratio = 0.4;
+
+	struct rt_hyp_internal hyp;
+	memset(&hyp, 0, sizeof(hyp));
+	hyp.hyp_magic = RT_HYP_INTERNAL_MAGIC;
+	VSET(hyp.hyp_Vi, 0, 0, 0);
+	VSET(hyp.hyp_Hi, 0, 0, full_height);
+	VSET(hyp.hyp_A, major_radius, 0, 0);
+	hyp.hyp_b = minor_radius;
+	hyp.hyp_bnr = neck_base_ratio;
+
+	struct rt_db_internal ip;
+	RT_DB_INTERNAL_INIT(&ip);
+	ip.idb_major_type = DB5_MAJORTYPE_BRLCAD;
+	ip.idb_minor_type = ID_HYP;
+	ip.idb_type = ID_HYP;
+	ip.idb_ptr = &hyp;
+	ip.idb_meth = &OBJ[ID_HYP];
+
+	double exact_volume = M_PI * major_radius * minor_radius * full_height *
+	    (1.0 + 2.0 * neck_base_ratio * neck_base_ratio) / 3.0;
+	fastf_t reported_volume = 0.0;
+	ip.idb_meth->ft_volume(&reported_volume, &ip);
+	double volume_error = rel_err(reported_volume, exact_volume) * 100.0;
+	printf("  %-42s  analytic_formula_err=%.12f%%  [%s]\n",
+	       "HYP (rt_hyp_volume)", volume_error,
+	       (volume_error <= 1.0e-9) ? "OK" : "FORMULA-FAIL");
+	if (volume_error > 1.0e-9)
+	    failures++;
+    }
+
+    {
+	plane_t planes[7] = {
+	    {2.0, 0.0, 0.0, 2.0},
+	    {-3.0, 0.0, 0.0, 0.0},
+	    {0.0, 4.0, 0.0, 4.0},
+	    {0.0, -5.0, 0.0, 0.0},
+	    {0.0, 0.0, 6.0, 6.0},
+	    {0.0, 0.0, -7.0, 0.0},
+	    {2.0, 2.0, 2.0, 5.0}
+	};
+	struct rt_arbn_internal arbn;
+	memset(&arbn, 0, sizeof(arbn));
+	arbn.magic = RT_ARBN_INTERNAL_MAGIC;
+	arbn.neqn = 7;
+	arbn.eqn = planes;
+
+	struct rt_db_internal ip;
+	RT_DB_INTERNAL_INIT(&ip);
+	ip.idb_major_type = DB5_MAJORTYPE_BRLCAD;
+	ip.idb_minor_type = ID_ARBN;
+	ip.idb_type = ID_ARBN;
+	ip.idb_ptr = &arbn;
+	ip.idb_meth = &OBJ[ID_ARBN];
+
+	const double exact_volume = 47.0 / 48.0;
+	const double exact_area = 45.0 / 8.0 + sqrt(3.0) / 8.0;
+	fastf_t reported_volume = 0.0;
+	fastf_t reported_area = 0.0;
+	ip.idb_meth->ft_volume(&reported_volume, &ip);
+	ip.idb_meth->ft_surf_area(&reported_area, &ip);
+	double volume_error = rel_err(reported_volume, exact_volume) * 100.0;
+	double area_error = rel_err(reported_area, exact_area) * 100.0;
+	printf("  %-42s  SA_err=%.12f%%  V_err=%.12f%%  [%s]\n",
+	       "ARBN clipped cube", area_error, volume_error,
+	       (area_error <= 1.0e-9 && volume_error <= 1.0e-9) ?
+	       "OK" : "FORMULA-FAIL");
+	if (area_error > 1.0e-9 || volume_error > 1.0e-9)
+	    failures++;
     }
 
     {
@@ -296,9 +383,110 @@ run_convergence_case(struct db_i *dbip,
 	    p.time_ms = 1500.0;
 	if (target_pct <= 5.0)
 	    p.time_ms = 2000.0;
+	point_t aabb_min, aabb_max, obb[8];
+	point_t *sample_points = NULL;
+	size_t sample_count = 0;
 	int64_t t0 = bu_gettime();
-	cr = rt_crofton_shoot(&sa, &vol, rtip, &p, NULL, NULL);
+	cr = rt_crofton_shoot(&sa, &vol, &aabb_min, &aabb_max, obb,
+	    &sample_points, &sample_count,
+	    rtip, &p, NULL, NULL);
 	run_sec = (double)(bu_gettime() - t0) / 1000000.0;
+
+	if (i == 0) {
+	    struct rt_crofton_result samples = RT_CROFTON_RESULT_INIT;
+	    const size_t ray_offset = 4096u;
+	    const size_t continuation_rays = 256u;
+	    struct rt_crofton_params sample_params =
+		{ray_offset + continuation_rays, 0.0, 0.0};
+	    int sample_ret = rt_crofton_collect(&samples, rtip,
+		&sample_params, 0, NULL, NULL);
+	    int full_samples_valid = sample_ret > 0 && samples.segments &&
+		samples.segment_count * 2 == samples.crossing_count &&
+		samples.ray_count == sample_params.n_rays;
+	    if (!full_samples_valid) {
+		printf("  %-24s  invalid structured Crofton output\\n", label);
+		failures++;
+	    } else {
+		for (size_t sample_index = 0;
+		     sample_index < samples.segment_count; sample_index++) {
+		    struct rt_crofton_segment *segment =
+			&samples.segments[sample_index];
+		    if (segment->thickness <= 0.0 ||
+			!NEAR_EQUAL(DIST_PNT_PNT(segment->in_point,
+				segment->out_point), segment->thickness, RT_LEN_TOL) ||
+			!NEAR_EQUAL(MAGNITUDE(segment->in_normal), 1.0,
+				VUNITIZE_TOL) ||
+			!NEAR_EQUAL(MAGNITUDE(segment->out_normal), 1.0,
+				VUNITIZE_TOL) ||
+			segment->ray_id >= samples.ray_count) {
+			printf("  %-24s  invalid structured segment\\n", label);
+			failures++;
+			break;
+		    }
+		}
+	    }
+
+	    struct rt_crofton_result offset_samples =
+		RT_CROFTON_RESULT_INIT;
+	    struct rt_crofton_params offset_params =
+		{continuation_rays, 0.0, 0.0};
+	    sample_ret = rt_crofton_collect(&offset_samples, rtip,
+		&offset_params, ray_offset, NULL, NULL);
+	    int offset_samples_valid = sample_ret > 0 &&
+		offset_samples.ray_count == offset_params.n_rays;
+	    if (!offset_samples_valid) {
+		printf("  %-24s  invalid offset Crofton output\\n", label);
+		failures++;
+	    } else {
+		for (size_t sample_index = 0;
+		     sample_index < offset_samples.segment_count;
+		     sample_index++) {
+		    size_t ray_id = offset_samples.segments[sample_index].ray_id;
+		    if (ray_id < ray_offset ||
+			    ray_id >= ray_offset + offset_params.n_rays) {
+			printf("  %-24s  invalid offset ray identifier\\n",
+			    label);
+			failures++;
+			break;
+		    }
+		}
+	    }
+
+	    if (full_samples_valid && offset_samples_valid) {
+		size_t suffix_start = 0;
+		while (suffix_start < samples.segment_count &&
+		       samples.segments[suffix_start].ray_id < ray_offset)
+		    suffix_start++;
+		size_t suffix_count = samples.segment_count - suffix_start;
+
+		if (suffix_count != offset_samples.segment_count) {
+		    printf("  %-24s  random stream continuation count mismatch\\n",
+			label);
+		    failures++;
+		} else {
+		    for (size_t sample_index = 0;
+			 sample_index < suffix_count; sample_index++) {
+			const struct rt_crofton_segment *full_segment =
+			    &samples.segments[suffix_start + sample_index];
+			const struct rt_crofton_segment *offset_segment =
+			    &offset_samples.segments[sample_index];
+			if (!crofton_segments_equal(full_segment, offset_segment)) {
+			    printf("  %-24s  random stream continuation mismatch\\n",
+				label);
+			    failures++;
+			    break;
+			}
+		    }
+		}
+	    }
+
+	    rt_crofton_result_free(&samples);
+	    if (samples.segments || samples.segment_count)
+		failures++;
+	    rt_crofton_result_free(&offset_samples);
+	    if (offset_samples.segments || offset_samples.segment_count)
+		failures++;
+	}
 	rt_i_destroy(rtip);
 
 	if (elapsed_total_sec)
@@ -308,8 +496,17 @@ run_convergence_case(struct db_i *dbip,
 	    printf("  %-24s  target=%.1f%%  crofton-fail (ret=%d)\n",
 		   label, target_pct, cr);
 	    failures++;
+	    if (sample_points)
+		bu_free(sample_points, "Crofton test points");
 	    continue;
 	}
+	if (!sample_points || sample_count != (size_t)cr ||
+	    aabb_min[X] > aabb_max[X] || !isfinite(obb[0][X])) {
+	    printf("  %-24s  invalid optional bounds/point outputs\n", label);
+	    failures++;
+	}
+	if (sample_points)
+	    bu_free(sample_points, "Crofton test points");
 
 	double sa_err_pct = rel_err(sa, sa_exact) * 100.0;
 	double v_err_pct = rel_err(vol, v_exact) * 100.0;

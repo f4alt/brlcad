@@ -64,6 +64,7 @@
 #include "bu/version.h"
 #include "bu/datetime.h"
 #include "bu/snooze.h"
+#include "bu/str.h"
 #include "vmath.h"
 #include "bn.h"
 #include "raytrace.h"
@@ -340,7 +341,16 @@ mged_bomb_hook(void *clientData, void *data)
 {
     struct bu_vls vls = BU_VLS_INIT_ZERO;
     char *str = (char *)data;
-    Tcl_Interp *interpreter = (Tcl_Interp *)clientData;
+    struct mged_state *s = (struct mged_state *)clientData;
+
+    /* Tcl interpreters are owned by one thread.  A worker-side bomb is
+     * already written to stderr by bu_bomb; attempting to show its dialog
+     * through the GUI interpreter would corrupt Tcl before termination. */
+    if (!s || !s->interp || !str ||
+	(s->gui_thread_id && Tcl_GetCurrentThread() != s->gui_thread_id))
+	return TCL_OK;
+
+    Tcl_Interp *interpreter = s->interp;
 
     bu_vls_printf(&vls, "set mbh_dialog [Dialog .#auto -modality application];");
     bu_vls_printf(&vls, "$mbh_dialog hide 1; $mbh_dialog hide 2; $mbh_dialog hide 3;");
@@ -765,6 +775,32 @@ parse_rset(struct bu_vls *msg, size_t argc, const char **argv, void *set_var)
 }
 
 
+static int
+mgedrc_has_legacy_set(const char *line)
+{
+    const char *cursor = line;
+
+    while (isspace((unsigned char)*cursor))
+	cursor++;
+
+    if (bu_strncmp(cursor, "set", 3) != 0 ||
+	!isspace((unsigned char)cursor[3]))
+	return 0;
+
+    cursor += 3;
+    while (isspace((unsigned char)*cursor))
+	cursor++;
+
+    /* Legacy MGED startup files used "set name=value". */
+    while (*cursor != '\0' && !isspace((unsigned char)*cursor)) {
+	if (*cursor == '=')
+	    return 1;
+	cursor++;
+    }
+    return 0;
+}
+
+
 /**
  * If an mgedrc file exists, open it and process the commands within.
  * Look first for a Shell environment variable, then for a file in the
@@ -780,7 +816,7 @@ do_rc(struct mged_state *s, int skip_rc, const char *rcfile_override)
     FILE *fp = NULL;
     char *path;
     struct bu_vls str = BU_VLS_INIT_ZERO;
-    int bogus;
+    int legacy_set;
 
 #define ENVRC	"MGED_RCFILE"
 #define RCFILE	".mgedrc"
@@ -828,25 +864,21 @@ do_rc(struct mged_state *s, int skip_rc, const char *rcfile_override)
 	}
     }
 
-    bogus = 0;
-    while (!feof(fp)) {
-	char buf[80];
+    legacy_set = 0;
+    while (!legacy_set) {
+	char buf[BUFSIZ];
 
-	/* Get beginning of line */
-	bu_fgets(buf, 80, fp);
-	/* If the user has a set command with an equal sign, remember to warn */
-	if (strstr(buf, "set") != NULL)
-	    if (strchr(buf, '=') != NULL) {
-		bogus = 1;
-		break;
-	    }
+	if (bu_fgets(buf, sizeof(buf), fp) == NULL)
+	    break;
+	legacy_set = mgedrc_has_legacy_set(buf);
     }
 
     fclose(fp);
-    if (bogus) {
+    if (legacy_set) {
 	bu_log("\nWARNING: The new format of the \"set\" command is:\n");
 	bu_log("    set varname value\n");
-	bu_log("If you are setting variables in your %s, you will ", RCFILE);
+	bu_log("If you are setting variables in %s, you will ",
+	       bu_vls_cstr(&str));
 	bu_log("need to change those\ncommands.\n\n");
     }
     if (Tcl_EvalFile(s->interp, bu_vls_addr(&str)) != TCL_OK) {
@@ -2010,7 +2042,7 @@ refresh(struct mged_state *s)
 	 */
 	set_curr_dm(s, p);
 	(void)dm_configure_win(DMP, 0);
-	if (mapped && DMP_dirty) {
+	if (curr_dm_mapped && DMP_dirty) {
 	    int restore_zbuffer = 0;
 
 	    if (mged_variables->mv_fb &&
@@ -2539,7 +2571,9 @@ main(int argc, char *argv[])
     bu_vls_init(&s->mged_prompt);
     s->dpy_string = NULL;
     s->cmd_running = 0;
+    s->command_state = NULL;
     s->log_drain_timer = NULL;
+    s->gui_thread_id = NULL;
     s->shutdown_state = MGED_SHUTDOWN_RUNNING;
     s->shutdown_exitcode = 0;
     s->stdin_chan = NULL;
@@ -3189,7 +3223,7 @@ main(int argc, char *argv[])
 		/* since we're in GUI mode, display any bu_bomb()
 		 * calls in text dialog windows.
 		 */
-		bu_bomb_add_hook(mged_bomb_hook, s->interp);
+		bu_bomb_add_hook(mged_bomb_hook, s);
 	    } /* status -- gui initialized */
 	} /* classic */
 

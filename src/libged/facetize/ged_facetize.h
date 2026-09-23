@@ -36,10 +36,11 @@
 #include "vmath.h"
 #include "bu/vls.h"
 #include "bn/tol.h"
-#include "bg/spsr.h"
 #include "rt/geom.h"
 #include "raytrace.h"
 #include "ged/defines.h"
+
+#include "./orchestrator.h"
 
 __BEGIN_DECLS
 
@@ -50,15 +51,13 @@ struct _ged_facetize_state {
     // Output
     int verbosity;
     int no_empty;
-    int make_nmg;
-    int nonovlp_brep;
     int no_fixup;
-    int no_perturb;
     int use_variant_plan;
     int tolerate_failures;
     int tolerated_failures;
     int tolerated_failure_details;
     int tolerated_failure_omitted;
+    size_t inspection_regions;
 
     /* Perturb validation thresholds (percentage, 0–100).
      * Trigger the perturb retry when the CSG–BoT difference exceeds these
@@ -67,22 +66,26 @@ struct _ged_facetize_state {
     fastf_t perturb_vol_tol;
 
     char *wdir;
+    bool cleanup_workspace;
     struct bu_vls *wfile;
     struct bu_vls *bname;
     struct bu_vls *log_file;
+    int log_file_is_temporary;
     FILE *lfile;
     struct bu_vls *failure_msg;
     struct bu_vls *tolerated_failure_log;
+    struct bu_vls *region_summary;
+    struct bu_vls *primitive_summary;
+    struct bu_vls *inspection_log;
 
     // Processing
-    int regions;
+    FacetizeExecutionOptions execution;
     int resume;
-    int in_place;
-    int nmg_booleval;
 
     // Settings
     int max_time;
     int max_pnts;
+    int max_workers;
     struct bu_vls *prefix;
     struct bu_vls *suffix;
 
@@ -97,7 +100,11 @@ struct _ged_facetize_state {
     struct db_i *dbip;
     union tree *facetize_tree;
     void *method_opts;
-    void *log_s;
+
+    /* Cache-local write measurements seed and refine worker write deadlines. */
+    int write_profiled;
+    double write_profile_bytes;
+    double write_profile_usec;
 
     /* Instance-aware variant plan (FacetizeVariantPlan *, NULL until planning) */
     void *variant_plan;
@@ -116,19 +123,21 @@ extern void
 facetize_tolerated_failure(struct _ged_facetize_state *, const char *, ...) _BU_ATTR_PRINTF23;
 
 extern void
-facetize_tolerated_summary(struct _ged_facetize_state *);
+facetize_summary(struct _ged_facetize_state *);
 
 extern int
 _db_uniq_test(struct bu_vls *n, void *data);
 
 extern int
-_ged_validate_objs_list(struct _ged_facetize_state *s, int argc, const char *argv[], int newobj_cnt);
+_ged_facetize_regions(struct _ged_facetize_state *s, const FacetizePlan &plan);
 
 extern int
-_ged_facetize_regions(struct _ged_facetize_state *s, int argc, const char **argv);
+_ged_facetize_objs(struct _ged_facetize_state *s, const FacetizePlan &plan);
 
 extern int
-_ged_facetize_nmgeval(struct _ged_facetize_state *s, int argc, const char **argv, const char *newname);
+_ged_facetize_nmgeval(struct _ged_facetize_state *s,
+	struct db_i *target_dbip, const char *database_path,
+	const std::vector<std::string> &input_names, const char *newname);
 
 extern int
 _ged_facetize_booleval(struct _ged_facetize_state *s, int argc, struct directory **dpa, const char *newname, bool output_to_working, bool cleanup);
@@ -148,13 +157,22 @@ _ged_facetize_leaves_tri(struct _ged_facetize_state *s, struct db_i *dbip, struc
 extern int
 _ged_facetize_booleval_tri(struct _ged_facetize_state *s, struct db_i *dbip, struct rt_wdb *wdbp, int argc, const char **argv, const char *newname, struct bu_list *vlfree, bool output_to_working, int curr_cnt, int total_cnt);
 
-extern int _nonovlp_brep_facetize(struct _ged_facetize_state *s, int argc, const char **argv);
+/**
+ * Evaluate a tessellated CSG tree and write the resulting BoT to an explicit
+ * database.  The input database is never modified unless it is also supplied
+ * as @p output_dbip.  This form lets isolated workers evaluate into an
+ * in-memory database before entering the staged-write protocol.
+ */
+extern int
+_ged_facetize_booleval_tri_to_db(struct _ged_facetize_state *s, struct db_i *dbip, struct rt_wdb *wdbp, int argc, const char **argv, const char *newname, struct bu_list *vlfree, struct db_i *output_dbip, int curr_cnt, int total_cnt);
+
+extern int _nonovlp_brep_facetize(struct _ged_facetize_state *s, const FacetizePlan &plan);
 
 extern struct rt_bot_internal *
 bot_fixup(struct _ged_facetize_state *s, struct db_i *wdbip, struct directory *bot_dp, const char *bname);
 
 extern void
-facetize_primitives_summary(struct _ged_facetize_state *s);
+facetize_collect_primitive_summary(struct _ged_facetize_state *s);
 
 __END_DECLS
 
@@ -219,31 +237,26 @@ struct FacetizeVariantPlan {
  * Returns an allocated FacetizeVariantPlan owned by the caller (or NULL on
  * allocation failure).  Primitives without ft_perturb support are counted in
  * n_perturb_fallbacks and will fall back to the original mesh at booleval time.
+ * If working_dbip is non-NULL it must be an indexed writable handle for the
+ * working database; it is borrowed and remains open on return.
  */
 extern FacetizeVariantPlan *
 _ged_facetize_build_variant_plan(struct _ged_facetize_state *s,
                                  int argc,
-                                 struct directory **dpa);
+                                 struct directory **dpa,
+			 struct db_i *working_dbip);
 
 /**
- * Tessellate the variant primitives in the working .g using the NMG method.
- * Called after _ged_facetize_leaves_tri() once original leaves are already
- * BoTs, either eagerly for direct booleval or lazily on the first
- * validation-triggered retry in region mode.  Updates
+ * Tessellate the variant primitives in the working .g using the configured
+ * primitive methods and options.  Called after _ged_facetize_leaves_tri() once
+ * original leaves are already BoTs, either eagerly for direct booleval or
+ * lazily on the first validation-triggered retry in region mode.  Updates
  * plan->n_variant_tess_failures for any variants that could not be
  * tessellated (they will silently fall back to the original mesh at booleval).
  */
 extern int
 _ged_facetize_tessellate_variant_names(struct _ged_facetize_state *s,
                                        FacetizeVariantPlan *plan);
-
-/** Forward declaration for use by plan.cpp */
-extern int
-tess_run(struct _ged_facetize_state *s,
-         const char **tess_cmd,
-         int tess_cmd_cnt,
-         fastf_t max_time,
-         int ocnt);
 
 #endif /* LIBGED_FACETIZE_GED_PRIVATE_H */
 

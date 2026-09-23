@@ -18,17 +18,18 @@ tasks as they are completed.
 THESE TASKS SHOULD HAPPEN BEFORE THE NEXT RELEASE
 -------------------------------------------------
 
-* coordinate with bext to have it produce a manifest of what
-  files need strclear/plief processing of various types so
-  we don't need to redo the characterization pass every time
-  we configure.  We have strclear and plief in bext, so that
-  repo should be capable of doing the work for us as a post
-  build step whenever bext changes.
+* revert the pixdiff/pixcmp change back to grayscale
+
+* coordinate with bext to have it produce a manifest of what files
+  need strclear/plief processing of various types so we don't need to
+  redo the characterization pass every time we configure.  We have
+  strclear and plief in bext, so that repo should be capable of doing
+  the work for us as a post build step whenever bext changes.
 
 * fix ARB5 move point 5 to actually move the point.
 
-* need extensive testing of MGED CSG editing with the shift
-  to librt based editing logic.
+* need extensive testing of MGED CSG editing with the shift to librt
+  based editing logic.
 
 * investigate gqa plotting display in MGED
 
@@ -43,11 +44,6 @@ THESE TASKS SHOULD HAPPEN WITHIN TWO RELEASE ITERATIONS
   inconsistent data (soltab needs to match).
 
 * verify arb6 editing in cheese wedge tutorial
-
-* rtarea is sometimes missing regions on summary reporting, at least
-  on Windows, possibly a threading issue setting up the results
-  container.
-
 
 THESE ARE UNSCHEDULED BACKLOG TASKS
 -----------------------------------
@@ -347,11 +343,6 @@ lookup check to ensure none are missing.
   error.  code appears to be assuming both /dev/X framebuffer and uses
   /dev/null redirect to sink output.
 
-* rtwizard greys out the File->New and Open menu items when run with a
-  filename, which is very confusing.  Either menu should remain usable
-  or there should be some other indication that a file was specified
-  and is open.
-
 * ability to visualize metaball centerpoints and with/without
   translucency.
 
@@ -372,9 +363,6 @@ lookup check to ensure none are missing.
   up everything at once - the latter has problems if part or all of
   comb2 is shared with comb1.  A workaround is to keep out comb2 and
   dbconcat it back in, then gdiff comb1 with the imported tree.
-
-* pixscale doesn't seem to handle stdin (due to bu_seek) for very
-  long
 
 * The embedded framebuffer for the X display manager is not working
   with Tcl/Tk 8.6 - it brings down mged with an Xerror when it tries
@@ -500,8 +488,6 @@ lookup check to ensure none are missing.
 
 * add unit tests for primitive callback routines (e.g., bbox).
 
-* use bu_gettime() in rt -l8 heatgraph visualization mode
-
 * fully implement analyze for all geometry objects
 
 * move analyze logic into libanalyze (with respective primitive logic
@@ -602,10 +588,6 @@ lookup check to ensure none are missing.
   libged command wrapper so it's consistent and available to any
   command.
 
-* mater command does not validate its arguments - fix that.  Also
-  properly document using "." to skip specifying something - not in
-  the man page currently.
-
 * bullet integration - need to expose restitution as an
   object parameter so we can configure behavior:
   http://www.bulletphysics.org/Bullet/phpBB3/viewtopic.php?p=&f=&t=3248
@@ -653,8 +635,6 @@ lookup check to ensure none are missing.
   expected?  intuitively, I would expected feeding the results of
   get_eyemodel to eye_pt to result in no change, modulo unit
   conversions.
-
-* make rt -b accept a pixel index in addition to x,y pixel coordinates
 
 * teach pixdiff and other tools that can/should support the capability
   to read/write (as appropriate) pixel index values or x,y coordinates
@@ -1089,12 +1069,6 @@ lookup check to ensure none are missing.
   ignore negative regions (regions subtracted from regions or
   intersected with them) since, while bad practice, are valid
   geometrically.
-
-* make sure there are no getenv() non-NULL assumptions within the
-  code.  might want to see if there's a pattern of variables being
-  checked such that a libbu interface would be warranted (e.g.,
-  instead of checking HOME, having a bu_find_directory(BU_USER_HOME)
-  routine or similar facility) for finding common resource locations.
 
 * make db_open modes behave the same as the fopen() modes (i.e.,
   create the .g if one doesn't exist when write mode)
@@ -2565,8 +2539,6 @@ DOCUMENTATION
   reference.
 
 * Need ability to search manual pages
-
-* rename MGED Help->Apropos to Help->Search Commands (apropos)
 
 * BRL-CAD Primitives
 	An overview of the various primitive object types in BRL-CAD,

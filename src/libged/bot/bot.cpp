@@ -823,11 +823,18 @@ _bot_cmd_pca(void *bs, int argc, const char **argv)
     return BRLCAD_OK;
 }
 
+static int
+bot_split_name_available(struct bu_vls *name, void *data)
+{
+    struct db_i *dbip = static_cast<struct db_i *>(data);
+    return db_lookup(dbip, bu_vls_cstr(name), LOOKUP_QUIET) == RT_DIR_NULL;
+}
+
+
 extern "C" int
 _bot_cmd_split(void *bs, int argc, const char **argv)
 {
-    int ret = BRLCAD_OK;
-    const char *usage_string = "bot split <objname>";
+    const char *usage_string = "bot split [-h] [--grp name] <objname>";
     const char *purpose_string = "Split BoT into objects containing topologically connected triangle subsets";
     if (_bot_cmd_msgs(bs, argc, argv, usage_string, purpose_string)) {
 	return BRLCAD_OK;
@@ -835,103 +842,89 @@ _bot_cmd_split(void *bs, int argc, const char **argv)
 
     struct _ged_bot_info *gb = (struct _ged_bot_info *)bs;
 
+    int print_help = 0;
+    const char *requested_group = NULL;
+    struct bu_opt_desc d[3];
+    BU_OPT(d[0], "h", "help", "", NULL, &print_help, "Print help");
+    BU_OPT(d[1], "", "grp", "name", &bu_opt_str, &requested_group,
+	"Name of the combination containing the split BoTs");
+    BU_OPT_NULL(d[2]);
+
     argc--; argv++;
 
+    int parsed_argc = bu_opt_parse(gb->gedp->ged_result_str, argc, argv, d);
+    if (print_help) {
+	char *option_help = bu_opt_describe(d, NULL);
+	bu_vls_printf(gb->gedp->ged_result_str, "Usage: %s\nOptions:\n",
+	    usage_string);
+	if (option_help) {
+	    bu_vls_strcat(gb->gedp->ged_result_str, option_help);
+	    bu_free(option_help, "BOT split option help");
+	}
+	return GED_HELP;
+    }
+    if (parsed_argc < 0) {
+	bu_vls_printf(gb->gedp->ged_result_str, "Usage: %s", usage_string);
+	return BRLCAD_ERROR;
+    }
+    argc = parsed_argc;
+
     if (argc != 1) {
-	bu_vls_printf(gb->gedp->ged_result_str, "%s", usage_string);
+	bu_vls_printf(gb->gedp->ged_result_str, "Usage: %s", usage_string);
 	return BRLCAD_ERROR;
     }
 
-    if (_bot_obj_setup(gb, argv[0]) & BRLCAD_ERROR) {
+    if (requested_group && !requested_group[0]) {
+	bu_vls_printf(gb->gedp->ged_result_str,
+	    "BOT split group name cannot be empty");
 	return BRLCAD_ERROR;
     }
 
-    struct rt_bot_internal *bot = (struct rt_bot_internal *)(gb->intern->idb_ptr);
-
-    int **fsets = NULL;
-    int *fset_cnts = NULL;
-
-    int split_cnt = bg_trimesh_split(&fsets, &fset_cnts, bot->faces, bot->num_faces);
-    if (split_cnt <= 0) {
-	bu_vls_printf(gb->gedp->ged_result_str, "BoT split unsuccessful");
-	ret = BRLCAD_ERROR;
-	goto bot_split_done;
+    GED_CHECK_READ_ONLY(gb->gedp, BRLCAD_ERROR);
+    struct bu_vls group_name = BU_VLS_INIT_ZERO;
+    if (requested_group) {
+	bu_vls_strcpy(&group_name, requested_group);
+	if (db_lookup(gb->gedp->dbip, requested_group,
+		LOOKUP_QUIET) != RT_DIR_NULL) {
+	    bu_vls_printf(gb->gedp->ged_result_str,
+		"Object %s already exists", requested_group);
+	    bu_vls_free(&group_name);
+	    return BRLCAD_ERROR;
+	}
+    } else {
+	bu_vls_sprintf(&group_name, "%s_bots", argv[0]);
+	if (db_lookup(gb->gedp->dbip, bu_vls_cstr(&group_name),
+		LOOKUP_QUIET) != RT_DIR_NULL) {
+	    if (bu_vls_incr(&group_name, NULL, NULL,
+		    bot_split_name_available,
+		    gb->gedp->dbip) < 0) {
+		bu_vls_printf(gb->gedp->ged_result_str,
+		    "Cannot generate a BOT split group name");
+		bu_vls_free(&group_name);
+		return BRLCAD_ERROR;
+	    }
+	}
     }
 
-    if (split_cnt == 1) {
-	bu_vls_printf(gb->gedp->ged_result_str, "BoT is fully connected topologically, not splitting");
-	goto bot_split_done;
+    struct bu_vls output_names = BU_VLS_INIT_ZERO;
+    int split_count = _ged_bot_split_object(gb->gedp, argv[0],
+	bu_vls_cstr(&group_name), &output_names, gb->gedp->ged_result_str);
+    if (split_count < 0) {
+	bu_vls_free(&output_names);
+	bu_vls_free(&group_name);
+	return BRLCAD_ERROR;
     }
-
-    // Two or more triangle sets - time for new bots
-    for (int i = 0; i < split_cnt; i++) {
-	// Because these are independent objects, we don't want to just make lots of copies
-	// of the full original vertex set.  Use bg_trimesh_3d_gc to boil down the data to
-	// a minimal representation of this BoT subset
-	struct rt_db_internal intern;
-	struct directory *dp = RT_DIR_NULL;
-	struct bu_vls bname = BU_VLS_INIT_ZERO;
-	int *ofaces = NULL;
-	point_t *opnts = NULL;
-	int n_opnts = 0;
-	int n_ofaces = bg_trimesh_3d_gc(&ofaces, &opnts, &n_opnts,
-					(const int *)fsets[i], fset_cnts[i], (const point_t *)bot->vertices);
-	if (n_ofaces < 0) {
-	    ret = BRLCAD_ERROR;
-	    goto bot_split_done;
-	}
-	struct rt_bot_internal *nbot;
-	BU_ALLOC(nbot, struct rt_bot_internal);
-	nbot->magic = RT_BOT_INTERNAL_MAGIC;
-	nbot->mode = bot->mode;
-	nbot->orientation = bot->orientation;
-	nbot->thickness = NULL;
-	nbot->face_mode = NULL;
-	nbot->num_faces = n_ofaces;
-	nbot->num_vertices = n_opnts;
-	nbot->faces = ofaces;
-	nbot->vertices = (fastf_t *)opnts;
-
-	RT_DB_INTERNAL_INIT(&intern);
-	intern.idb_major_type = DB5_MAJORTYPE_BRLCAD;
-	intern.idb_type = ID_BOT;
-	intern.idb_meth = &OBJ[ID_BOT];
-	intern.idb_ptr = (void *)nbot;
-
-	// TODO - more robust name generation
-	bu_vls_sprintf(&bname, "%s.%d", gb->dp->d_namep, i);
-	dp = db_diradd(gb->gedp->dbip, bu_vls_cstr(&bname), RT_DIR_PHONY_ADDR, 0, RT_DIR_SOLID, (void *)&intern.idb_type);
-	if (dp == RT_DIR_NULL) {
-	    bu_vls_printf(gb->gedp->ged_result_str, "Cannot add %s to directory\n", bu_vls_cstr(&bname));
-	    ret = BRLCAD_ERROR;
-	    bu_vls_free(&bname);
-	    goto bot_split_done;
-	}
-
-	if (rt_db_put_internal(dp, gb->gedp->dbip, &intern) < 0) {
-	    bu_vls_printf(gb->gedp->ged_result_str, "Failed to write %s to database\n", bu_vls_cstr(&bname));
-	    rt_db_free_internal(&intern);
-	    ret = BRLCAD_ERROR;
-	    bu_vls_free(&bname);
-	    goto bot_split_done;
-	}
-
-	bu_vls_free(&bname);
+    if (!split_count) {
+	bu_vls_printf(gb->gedp->ged_result_str,
+	    "BoT is fully connected topologically, not splitting");
+    } else {
+	bu_vls_printf(gb->gedp->ged_result_str,
+	    "Split into %d objects in %s: %s", split_count,
+	    bu_vls_cstr(&group_name), bu_vls_cstr(&output_names));
     }
-
-bot_split_done:
-    if (fsets) {
-	for (int i = 0; i < split_cnt; i++) {
-	    if (fsets[i])
-		bu_free(fsets[i], "free mesh array");
-	}
-	bu_free(fsets, "free mesh array container");
-    }
-    if (fset_cnts)
-	bu_free(fset_cnts, "free cnts array");
-    if (split_cnt > 1)
-	bu_vls_printf(gb->gedp->ged_result_str, "Split into %d objects", split_cnt);
-    return ret;
+    bu_vls_free(&output_names);
+    bu_vls_free(&group_name);
+    return BRLCAD_OK;
 }
 
 extern "C" int
@@ -1402,7 +1395,6 @@ ged_bot_core(struct ged *gedp, int argc, const char *argv[])
 
     int ret = BRLCAD_ERROR;
     if (bu_cmd(_bot_cmds, argc, argv, 0, (void *)&gb, &ret) == BRLCAD_OK) {
-	ret = BRLCAD_OK;
 	goto bot_cleanup;
     }
 

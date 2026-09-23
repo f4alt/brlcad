@@ -184,6 +184,18 @@ if {![info exists mged_default(lighting)]} {
     set mged_default(lighting) 1
 }
 
+proc mged_dm_supports {id setting} {
+    global mged_gui
+
+    if {[catch {winset $mged_gui($id,active_dm)}]} {
+	return 0
+    }
+    if {[catch {dm set $setting} value]} {
+	return 0
+    }
+    return [expr {$value eq "0" || $value eq "1"}]
+}
+
 if {![info exists mged_default(perspective_mode)]} {
     set mged_default(perspective_mode) 0
 }
@@ -267,8 +279,9 @@ proc mged_open_manual {parent screen} {
     global mged_html_dir
 
     set manual_path [file join $mged_html_dir index.html]
+    set browser [auto_execok $mged_browser]
     if {[file readable $manual_path] &&
-	![catch {exec -- $mged_browser $manual_path &}]} {
+	[llength $browser] && ![catch {exec -- {*}$browser $manual_path &}]} {
 	return
     }
 
@@ -1836,7 +1849,9 @@ hoc_register_menu_data "Create" "$ptype..." "Make a $ptype" $ksl
 	modify the state of the drawing window) will apply only to the
 	drawing window wherein the user typed. This feature is provided
 	to lessen the need to use the mouse." } }
-    if {$mged_gui($id,dtype) == "ogl" || $mged_gui($id,dtype) == "wgl"} {
+    if {[mged_dm_supports $id depthcue] &&
+	[mged_dm_supports $id zbuffer] &&
+	[mged_dm_supports $id lighting]} {
 	.$id.menubar.misc add checkbutton -offvalue 0 -onvalue 1\
 	    -variable mged_gui($id,depthcue) -label "Depth Cueing" -underline 0\
 	    -command "mged_apply $id \"dm set depthcue \$mged_gui($id,depthcue)\""
@@ -2277,7 +2292,7 @@ hoc_register_menu_data "Create" "$ptype..." "Make a $ptype" $ksl
     update_mged_vars $id
     set mged_gui($id,qray_effects) [qray effects]
 
-    if {$mged_gui($id,dtype) == "ogl" || $mged_gui($id,dtype) == "wgl"} {
+    if {[mged_dm_supports $id zbuffer]} {
 	mged_apply_local $id "dm set zbuffer $mged_default(zbuffer)"
     }
 
@@ -2457,10 +2472,10 @@ proc update_mged_vars { id } {
     set mged_gui($id,orig_gui) $orig_gui
     set mged_gui($id,forward_keys) $forwarding_key($mged_gui($id,active_dm))
 
-    if {$mged_gui($id,dtype) == "ogl" || $mged_gui($id,dtype) == "ogl"} {
-	set mged_gui($id,depthcue) [dm set depthcue]
-	set mged_gui($id,zbuffer) [dm set zbuffer]
-	set mged_gui($id,lighting) [dm set lighting]
+    foreach setting {depthcue zbuffer lighting} {
+	if {[mged_dm_supports $id $setting]} {
+	    set mged_gui($id,$setting) [dm set $setting]
+	}
     }
 
     set_mged_v_axes_pos $id
@@ -2783,16 +2798,17 @@ proc view_ring_add {id} {
 }
 
 proc find_view_index {vid vi_in m} {
-    global mged_default
     upvar $vi_in vi
 
-    # find view index of menu entry whose value is $vid
-    for {set vi 0} {$vi < $mged_default(max_views)} {incr vi} {
+    set last [$m index end]
+    if {$last eq "none"} {
+	return 0
+    }
+    for {set vi 0} {$vi <= $last} {incr vi} {
 	if {[$m entrycget $vi -value] == $vid} {
 	    return 1
 	}
     }
-
     return 0
 }
 
@@ -2826,33 +2842,44 @@ proc view_ring_set_view {id vid vi} {
     }
 }
 
+proc view_ring_reconcile_selection {id} {
+    global view_ring
+
+    set menu .$id.menubar.viewring.select
+    # Stored view IDs are not renumbered, so deleting ID 0 may leave a
+    # different ID as the first valid selection.
+    set last [$menu index end]
+    if {$last eq "none"} {
+	set fallback 0
+    } else {
+	set fallback [$menu entrycget 0 -value]
+    }
+
+    foreach key [list $id "$id,prev" "$id,curr"] {
+	if {![info exists view_ring($key)] ||
+	    ![find_view_index $view_ring($key) unused $menu]} {
+	    set view_ring($key) $fallback
+	}
+    }
+}
+
 proc view_ring_delete {id vid} {
     global mged_gui
-    global mged_default
-    global view_ring
     global mged_collaborators
-
-    #		 winset $mged_gui($id,active_dm)
 
     if {![find_view_index $vid vi .$id.menubar.viewring.select]} {
 	return
     }
 
-    # we're collaborating, so update collaborators
+    set targets [list $id]
     if {[lsearch -exact $mged_collaborators $id] != -1} {
-	foreach cid $mged_collaborators {
-	    .$cid.menubar.viewring.select delete $vi
-	    .$cid.menubar.viewring.delete delete $vi
-	    set mged_gui($cid,views) [lreplace $mged_gui($cid,views) $vi $vi]
-	    set view_ring($cid) 0
-	    set view_ring($cid,prev) 0
-	}
-    } else {
-	.$id.menubar.viewring.select delete $vi
-	.$id.menubar.viewring.delete delete $vi
-	set mged_gui($id,views) [lreplace $mged_gui($id,views) $vi $vi]
-	set view_ring($id) 0
-	set view_ring($id,prev) 0
+	set targets $mged_collaborators
+    }
+    foreach cid $targets {
+	.$cid.menubar.viewring.select delete $vi
+	.$cid.menubar.viewring.delete delete $vi
+	set mged_gui($cid,views) [lreplace $mged_gui($cid,views) $vi $vi]
+	view_ring_reconcile_selection $cid
     }
 }
 

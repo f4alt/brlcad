@@ -34,12 +34,14 @@
 #include "common.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include "bio.h"
 
 #include "bu/app.h"
 #include "bu/getopt.h"
+#include "bu/opt.h"
 #include "bu/malloc.h"
 #include "bu/log.h"
 #include "bu/file.h"
@@ -69,29 +71,22 @@ static char usage[] = "\
 Usage: bwscale [-r] [-s squareinsize] [-w inwidth] [-n inheight]\n\
 	[-S squareoutsize] [-W outwidth] [-N outheight] [in.bw] > out.bw\n";
 
-static int
-parse_positive_int_arg(const char *arg, int *value, const char *label)
-{
-    char *end = NULL;
-    long parsed = 0;
-
-    errno = 0;
-    parsed = strtol(arg, &end, 10);
-    if (arg[0] == '\0' || end == arg || *end != '\0' || errno != 0 || parsed <= 0) {
-	fprintf(stderr, "bwscale: invalid %s '%s'\n", label, arg);
-	return 0;
-    }
-
-    *value = (int)parsed;
-    return 1;
-}
-
 /****** THIS PROBABLY SHOULD BE ELSEWHERE *******/
 
 /* ceiling and floor functions for positive numbers */
 #define CEILING(x)	(((x) > (int)(x)) ? (int)(x)+1 : (int)(x))
 #define FLOOR(x)	((int)(x))
 #define MIN(x, y)	(((x) > (y)) ? (y) : (x))
+
+
+static double
+interpolation_step(int input_size, int output_size)
+{
+    if (output_size == 1)
+	return 0.0;
+
+    return (double)(input_size - 1) / (double)(output_size - 1);
+}
 
 
 /*
@@ -124,33 +119,34 @@ fill_buffer(int y)
 void
 ninterp(FILE *ofp, int ix, int iy, int ox, int oy)
 {
-    int i, j;
+    int i, input_x, input_y, j;
     double x, y;
     double xstep, ystep;
     unsigned char *op, *lp;
     size_t ret;
 
-    xstep = (double)(ix - 1) / (double)ox - 1.0e-6;
-    ystep = (double)(iy - 1) / (double)oy - 1.0e-6;
+    xstep = interpolation_step(ix, ox);
+    ystep = interpolation_step(iy, oy);
 
     /* For each output pixel */
     for (j = 0; j < oy; j++) {
-	y = j * ystep;
+	y = (j == oy - 1) ? (double)(iy - 1) : j * ystep;
+	input_y = (int)(y + 0.5);
 	/*
-	 * Make sure we have this row (and the one after it)
-	 * in the buffer
+	 * Make sure we have this row in the buffer.
 	 */
-	bufy = (int)y - buf_start;
-	if (bufy < 0 || bufy >= buflines-1) {
-	    fill_buffer((int)y);
-	    bufy = (int)y - buf_start;
+	bufy = input_y - buf_start;
+	if (bufy < 0 || bufy >= buflines) {
+	    fill_buffer(input_y);
+	    bufy = input_y - buf_start;
 	}
 
 	op = outbuf;
 
 	for (i = 0; i < ox; i++) {
-	    x = i * xstep;
-	    lp = &buffer[bufy*scanlen+(int)x];
+	    x = (i == ox - 1) ? (double)(ix - 1) : i * xstep;
+	    input_x = (int)(x + 0.5);
+	    lp = &buffer[bufy*scanlen+input_x];
 	    *op++ = lp[0];
 	}
 
@@ -170,41 +166,44 @@ void
 binterp(FILE *ofp, int ix, int iy, int ox, int oy)
 {
     int i, j;
+    int next_bufy, xoffset;
     double x, y, dx, dy, mid1, mid2;
     double xstep, ystep;
     unsigned char *op, *up, *lp;
 
-    xstep = (double)(ix - 1) / (double)ox - 1.0e-6;
-    ystep = (double)(iy - 1) / (double)oy - 1.0e-6;
+    xstep = interpolation_step(ix, ox);
+    ystep = interpolation_step(iy, oy);
 
     /* For each output pixel */
     for (j = 0; j < oy; j++) {
 	size_t ret;
-	y = j * ystep;
+	y = (j == oy - 1) ? (double)(iy - 1) : j * ystep;
 	/*
 	 * Make sure we have this row (and the one after it)
 	 * in the buffer
 	 */
 	bufy = (int)y - buf_start;
-	if (bufy < 0 || bufy >= buflines-1) {
+	if (bufy < 0 || bufy >= buflines || ((int)y < iy - 1 && bufy >= buflines - 1)) {
 	    fill_buffer((int)y);
 	    bufy = (int)y - buf_start;
 	}
+	next_bufy = ((int)y < iy - 1) ? bufy + 1 : bufy;
 
 	op = outbuf;
 
 	for (i = 0; i < ox; i++) {
-	    x = i * xstep;
+	    x = (i == ox - 1) ? (double)(ix - 1) : i * xstep;
 	    dx = x - (int)x;
 	    dy = y - (int)y;
+	    xoffset = ((int)x < ix - 1) ? 1 : 0;
 
 	    /* Note: (1-a)*foo + a*bar = foo + a*(bar-foo) */
 
 	    lp = &buffer[bufy*scanlen+(int)x];
-	    up = &buffer[(bufy+1)*scanlen+(int)x];
+	    up = &buffer[next_bufy*scanlen+(int)x];
 
-	    mid1 = lp[0] + dx * ((double)lp[1] - (double)lp[0]);
-	    mid2 = up[0] + dx * ((double)up[1] - (double)up[0]);
+	    mid1 = lp[0] + dx * ((double)lp[xoffset] - (double)lp[0]);
+	    mid2 = up[0] + dx * ((double)up[xoffset] - (double)up[0]);
 
 	    *op++ = mid1 + dy * (mid2 - mid1);
 	}
@@ -347,30 +346,30 @@ get_args(int argc, char **argv)
 		break;
 	    case 'S':
 		/* square size */
-		if (!parse_positive_int_arg(bu_optarg, &outx, "output size"))
+		if (!bu_opt_scan_int_range(bu_optarg, &outx, 1, INT_MAX, "output size"))
 		    return 0;
 		outy = outx;
 		break;
 	    case 's':
 		/* square size */
-		if (!parse_positive_int_arg(bu_optarg, &inx, "input size"))
+		if (!bu_opt_scan_int_range(bu_optarg, &inx, 1, INT_MAX, "input size"))
 		    return 0;
 		iny = inx;
 		break;
 	    case 'W':
-		if (!parse_positive_int_arg(bu_optarg, &outx, "output width"))
+		if (!bu_opt_scan_int_range(bu_optarg, &outx, 1, INT_MAX, "output width"))
 		    return 0;
 		break;
 	    case 'w':
-		if (!parse_positive_int_arg(bu_optarg, &inx, "input width"))
+		if (!bu_opt_scan_int_range(bu_optarg, &inx, 1, INT_MAX, "input width"))
 		    return 0;
 		break;
 	    case 'N':
-		if (!parse_positive_int_arg(bu_optarg, &outy, "output height"))
+		if (!bu_opt_scan_int_range(bu_optarg, &outy, 1, INT_MAX, "output height"))
 		    return 0;
 		break;
 	    case 'n':
-		if (!parse_positive_int_arg(bu_optarg, &iny, "input height"))
+		if (!bu_opt_scan_int_range(bu_optarg, &iny, 1, INT_MAX, "input height"))
 		    return 0;
 		break;
 
@@ -386,13 +385,13 @@ get_args(int argc, char **argv)
 	    bu_log("bwscale: cannot open \"%s\" for reading\n",file_name);
 	    return 0;
 	}
-	if (!parse_positive_int_arg(argv[bu_optind++], &inx, "input width"))
+	if (!bu_opt_scan_int_range(argv[bu_optind++], &inx, 1, INT_MAX, "input width"))
 	    return 0;
-	if (!parse_positive_int_arg(argv[bu_optind++], &iny, "input height"))
+	if (!bu_opt_scan_int_range(argv[bu_optind++], &iny, 1, INT_MAX, "input height"))
 	    return 0;
-	if (!parse_positive_int_arg(argv[bu_optind++], &outx, "output width"))
+	if (!bu_opt_scan_int_range(argv[bu_optind++], &outx, 1, INT_MAX, "output width"))
 	    return 0;
-	if (!parse_positive_int_arg(argv[bu_optind++], &outy, "output height"))
+	if (!bu_opt_scan_int_range(argv[bu_optind++], &outy, 1, INT_MAX, "output height"))
 	    return 0;
 	return 1;
     }

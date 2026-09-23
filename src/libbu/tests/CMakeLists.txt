@@ -42,6 +42,7 @@ set(
   test_process.c
   test_ptbl.c
   test_realpath.c
+  test_scan.c
   test_semaphore.c
   test_snooze.c
   test_sort.c
@@ -127,6 +128,7 @@ brlcad_add_test(NAME bu_list_empty COMMAND bu_test test_list 0)
 brlcad_add_test(NAME bu_list_single COMMAND bu_test test_list 1)
 brlcad_add_test(NAME bu_list_many COMMAND bu_test test_list 16)
 brlcad_add_test(NAME bu_sscanf_compare COMMAND bu_sscanf)
+brlcad_add_test(NAME bu_scan_fastf_t COMMAND bu_test test_scan)
 brlcad_add_test(NAME bu_gethostname_lookup COMMAND bu_gethostname)
 
 
@@ -285,6 +287,9 @@ brlcad_add_test(NAME bu_path_dirname_null COMMAND bu_test test_dirname)
 
 #  ************ test_env.c tests *************
 
+brlcad_add_test(NAME bu_mem COMMAND bu_test test_env)
+brlcad_add_test(NAME bu_mem_process_limit COMMAND bu_test test_env -m)
+brlcad_add_test(NAME bu_mem_process_resident COMMAND bu_test test_env -r)
 brlcad_add_test(NAME bu_editor COMMAND bu_test test_env -e)
 
 
@@ -835,6 +840,7 @@ brlcad_add_test(NAME bu_mappedfile_serial_16384 COMMAND bu_test test_mappedfile 
 brlcad_add_test(NAME bu_mappedfile_parallel_16384 COMMAND bu_test test_mappedfile 2 16384)
 brlcad_add_test(NAME bu_mappedfile_repeat_serial_10 COMMAND bu_test test_mappedfile 3 10)
 brlcad_add_test(NAME bu_mappedfile_repeat_parallel_10 COMMAND bu_test test_mappedfile 4 10)
+brlcad_add_test(NAME bu_mappedfile_rooted_path COMMAND bu_test test_mappedfile 6 1)
 #BRLCAD_ADD_TEST(NAME bu_mappedfile_parallel_free COMMAND bu_test test_mappedfile 5)
 
 # The 16k mapping tests may take a large amount of time in some situations -

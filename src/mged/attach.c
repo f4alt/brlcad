@@ -79,6 +79,7 @@ void set_curr_dm(struct mged_state *s, struct mged_dm *nc)
     }
 
     s->mged_curr_dm = nc;
+    mged_fbserv_set_active_session(nc);
     if (nc != MGED_DM_NULL && nc->dm_view_state) {
 	s->gedp->ged_gvp = nc->dm_view_state->vs_gvp;
 	s->gedp->ged_gvp->gv_s->gv_grid = *nc->dm_grid_state; /* struct copy */
@@ -725,7 +726,7 @@ dm_var_init(struct mged_state *s, struct mged_dm *target_dm)
     if (target_dm->dm_dmp) {
 	dm_set_dirty(target_dm->dm_dmp, 1);
     }
-    mapped = 1;
+    curr_dm_mapped = 1;
     s->mged_curr_dm->dm_netfd = -1;
     mged_dm_owner = 1;
     am_mode = AMM_IDLE;

@@ -36,23 +36,32 @@
 #include "common.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
+#include <string.h>
 #include "bio.h"
 
 #include "bu/app.h"
 #include "bu/getopt.h"
+#include "bu/opt.h"
 #include "bu/malloc.h"
 #include "bu/log.h"
 #include "bu/file.h"
 
 
 #define MAXBUFBYTES 3*1024*1024	/* max bytes to malloc in buffer space */
+#define INTERPOLATION_SCANLINES 2
 
 unsigned char *outbuf;
 unsigned char *buffer;
 ssize_t scanlen;		/* length of infile (and buffer) scanlines */
 ssize_t buflines;		/* Number of lines held in buffer */
-b_off_t buf_start = -1000;	/* First line in buffer */
+
+static b_off_t buf_start = -1000;	/* First line in buffer */
+
+static ssize_t bufloaded;	/* Number of valid lines held in buffer */
+
+static b_off_t next_scanline;	/* Next unread input scanline */
 
 ssize_t bufy;				/* y coordinate in buffer */
 FILE *buffp;
@@ -70,23 +79,6 @@ static char usage[] = "\
 Usage: pixscale [-r] [-s squareinsize] [-w inwidth] [-n inheight]\n\
 	[-S squareoutsize] [-W outwidth] [-N outheight] [in.pix] > out.pix\n";
 
-static int
-parse_positive_int_arg(const char *arg, int *value, const char *label)
-{
-    char *end = NULL;
-    long parsed = 0;
-
-    errno = 0;
-    parsed = strtol(arg, &end, 10);
-    if (arg[0] == '\0' || end == arg || *end != '\0' || errno != 0 || parsed <= 0) {
-	bu_log("pixscale: invalid %s '%s'\n", label, arg);
-	return 0;
-    }
-
-    *value = (int)parsed;
-    return 1;
-}
-
 /****** THIS PROBABLY SHOULD BE ELSEWHERE *******/
 
 /* ceiling and floor functions for positive numbers */
@@ -95,35 +87,63 @@ parse_positive_int_arg(const char *arg, int *value, const char *label)
 #define MIN(x, y)	(((x) > (y)) ? (y) : (x))
 
 
-/*
- * Load the buffer with scan lines centered around
- * the given y coordinate.
- */
+static size_t
+read_scanlines(unsigned char *destination, size_t count)
+{
+    size_t ret = fread(destination, (size_t)scanlen, count, buffp);
+
+    if (ret < count && ferror(buffp))
+	bu_exit(3, "pixscale: error reading input: %s\n", strerror(errno));
+
+    return ret;
+}
+
+
+/* Refill without seeking so files and standard input behave alike. */
 void
 fill_buffer(int y)
 {
-    static b_off_t file_pos = 0;
-    size_t ret;
+    size_t keep = 0;
 
-    buf_start = y - buflines/2;
-    if (buf_start < 0)
-	buf_start = 0;
+    if ((b_off_t)y < buf_start)
+	bu_exit(3, "pixscale: cannot read input scanlines out of order\n");
 
-    /* bu_log("filepos is %zu, buf_start is %zu, scanlen is %zu\n", (size_t)file_pos, (size_t)buf_start, (size_t)scanlen); */
+    if (bufloaded > 0 && (b_off_t)y < buf_start + bufloaded) {
+	keep = (size_t)(buf_start + bufloaded - y);
+	memmove(buffer, buffer + ((b_off_t)y - buf_start) * scanlen, keep * (size_t)scanlen);
+    } else {
+	while (next_scanline < (b_off_t)y) {
+	    size_t skip = (size_t)((b_off_t)y - next_scanline);
+	    size_t chunk = (skip < (size_t)buflines) ? skip : (size_t)buflines;
+	    size_t ret = read_scanlines(buffer, chunk);
 
-    if (file_pos != buf_start * scanlen) {
-	if (bu_fseek(buffp, buf_start * scanlen, 0) < 0) {
-	    bu_exit(3, "pixscale: Can't seek to input pixel! y=%d\n", y);
+	    next_scanline += (b_off_t)ret;
+	    if (ret != chunk)
+		bu_exit(3, "pixscale: input ends before scanline %d\n", y);
 	}
-	file_pos = buf_start * scanlen;
     }
-    ret = fread(buffer, scanlen, buflines, buffp);
-    if (ret < (size_t)buflines && ferror(buffp))
-	perror("fread");
-    else if (feof(buffp))
-	bu_log("WARNING: Short read (%zu < %zu)", ret, buflines);
 
-    file_pos += buflines * scanlen;
+    buf_start = y;
+    bufloaded = (ssize_t)(keep + read_scanlines(buffer + keep * (size_t)scanlen,
+	(size_t)buflines - keep));
+    next_scanline += (b_off_t)(bufloaded - (ssize_t)keep);
+}
+
+
+static void
+buffer_scanlines(int y, size_t count)
+{
+    b_off_t offset = (b_off_t)y - buf_start;
+
+    if (offset < 0 || offset + (b_off_t)count > bufloaded) {
+	fill_buffer(y);
+	offset = (b_off_t)y - buf_start;
+    }
+
+    if (offset < 0 || offset + (b_off_t)count > bufloaded)
+	bu_exit(3, "pixscale: input ends before scanline %d\n", y + (int)count - 1);
+
+    bufy = (ssize_t)offset;
 }
 
 
@@ -151,11 +171,7 @@ ninterp(FILE *ofp, int ix, int iy, int ox, int oy)
 	 * Make sure we have this row (and the one after it)
 	 * in the buffer
 	 */
-	bufy = (int)y - buf_start;
-	if (bufy < 0 || bufy >= buflines-1) {
-	    fill_buffer((int)y);
-	    bufy = (int)y - buf_start;
-	}
+	buffer_scanlines((int)y, 1);
 
 	op = outbuf;
 
@@ -198,11 +214,7 @@ binterp(FILE *ofp, int ix, int iy, int ox, int oy)
 	 * Make sure we have this row (and the one after it)
 	 * in the buffer
 	 */
-	bufy = (int)y - buf_start;
-	if (bufy < 0 || bufy >= buflines-1) {
-	    fill_buffer((int)y);
-	    bufy = (int)y - buf_start;
-	}
+	buffer_scanlines((int)y, INTERPOLATION_SCANLINES);
 
 	op = outbuf;
 
@@ -298,11 +310,7 @@ scale(FILE *ofp, int ix, int iy, int ox, int oy)
 	    for (l = FLOOR(ystart); l < CEILING(yend); l++) {
 
 		/* Make sure we have this row in the buffer */
-		bufy = l - buf_start;
-		if (bufy < 0 || bufy >= buflines) {
-		    fill_buffer(l);
-		    bufy = l - buf_start;
-		}
+		buffer_scanlines(l, 1);
 
 		/* Compute height of this row */
 		if ((double)l < ystart)
@@ -356,12 +364,19 @@ init_buffer(void)
     if (max > BU_PAGE_SIZE)
 	max = BU_PAGE_SIZE;
 
+    if (iny > 1 && max < INTERPOLATION_SCANLINES)
+	max = INTERPOLATION_SCANLINES;
+    else if (max < 1)
+	max = 1;
+
     if (max < iny)
 	buflines = max;
     else
 	buflines = iny;
 
-    buf_start = (-buflines);
+    buf_start = 0;
+    bufloaded = 0;
+    next_scanline = 0;
     buffer = (unsigned char *)bu_malloc(buflines * scanlen, "buffer");
 }
 
@@ -379,30 +394,30 @@ get_args(int argc, char **argv)
 		break;
 	    case 'S':
 		/* square size */
-		if (!parse_positive_int_arg(bu_optarg, &outx, "output size"))
+		if (!bu_opt_scan_int_range(bu_optarg, &outx, 1, INT_MAX, "output size"))
 		    return 0;
 		outy = outx;
 		break;
 	    case 's':
 		/* square size */
-		if (!parse_positive_int_arg(bu_optarg, &inx, "input size"))
+		if (!bu_opt_scan_int_range(bu_optarg, &inx, 1, INT_MAX, "input size"))
 		    return 0;
 		iny = inx;
 		break;
 	    case 'W':
-		if (!parse_positive_int_arg(bu_optarg, &outx, "output width"))
+		if (!bu_opt_scan_int_range(bu_optarg, &outx, 1, INT_MAX, "output width"))
 		    return 0;
 		break;
 	    case 'w':
-		if (!parse_positive_int_arg(bu_optarg, &inx, "input width"))
+		if (!bu_opt_scan_int_range(bu_optarg, &inx, 1, INT_MAX, "input width"))
 		    return 0;
 		break;
 	    case 'N':
-		if (!parse_positive_int_arg(bu_optarg, &outy, "output height"))
+		if (!bu_opt_scan_int_range(bu_optarg, &outy, 1, INT_MAX, "output height"))
 		    return 0;
 		break;
 	    case 'n':
-		if (!parse_positive_int_arg(bu_optarg, &iny, "input height"))
+		if (!bu_opt_scan_int_range(bu_optarg, &iny, 1, INT_MAX, "input height"))
 		    return 0;
 		break;
 
@@ -418,13 +433,13 @@ get_args(int argc, char **argv)
 	    bu_log("pixscale: cannot open \"%s\" for reading\n", file_name);
 	    return 0;
 	}
-	if (!parse_positive_int_arg(argv[bu_optind++], &inx, "input width"))
+	if (!bu_opt_scan_int_range(argv[bu_optind++], &inx, 1, INT_MAX, "input width"))
 	    return 0;
-	if (!parse_positive_int_arg(argv[bu_optind++], &iny, "input height"))
+	if (!bu_opt_scan_int_range(argv[bu_optind++], &iny, 1, INT_MAX, "input height"))
 	    return 0;
-	if (!parse_positive_int_arg(argv[bu_optind++], &outx, "output width"))
+	if (!bu_opt_scan_int_range(argv[bu_optind++], &outx, 1, INT_MAX, "output width"))
 	    return 0;
-	if (!parse_positive_int_arg(argv[bu_optind++], &outy, "output height"))
+	if (!bu_opt_scan_int_range(argv[bu_optind++], &outy, 1, INT_MAX, "output height"))
 	    return 0;
 	return 1;
     }

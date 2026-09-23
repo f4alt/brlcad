@@ -483,19 +483,6 @@ _ged_pnts_tri_cmd_ballpivot(void *bs, int argc, const char **argv)
     return wret;
 }
 
-/* custom bu_opt for size_t threads in spsr */
-static int
-_pnts_opt_size_t(struct bu_vls *UNUSED(msg), size_t UNUSED(argc), const char **argv, void *set_c)
-{
-    size_t *t = (size_t *)set_c;
-    int tmp = 0;
-    const char *a = argv[0];
-    if (bu_opt_int(NULL, 1, &a, &tmp) < 0) return -1;
-    if (tmp < 0) return -1;
-    *t = (size_t)tmp;
-    return 1;
-}
-
 /* tri spsr */
 static int
 _ged_pnts_tri_cmd_spsr(void *bs, int argc, const char **argv)
@@ -508,29 +495,23 @@ _ged_pnts_tri_cmd_spsr(void *bs, int argc, const char **argv)
     struct bg_3d_spsr_opts opts = BG_3D_SPSR_OPTS_DEFAULT;
 
     int print_help = 0;
-    struct bu_opt_desc d[23];
-    BU_OPT(d[0],  "h", "help",             "",  NULL,              &print_help,           "Print help and exit");
-    BU_OPT(d[1],  "",  "degree",           "#", &bu_opt_int,       &opts.degree,          "Finite element degree");
-    BU_OPT(d[2],  "",  "btype",            "#", &bu_opt_int,       &opts.btype,           "Boundary type (1:FREE, 2:NEUMANN, 3:DIRICHLET)");
-    BU_OPT(d[3],  "",  "depth",            "#", &bu_opt_int,       &opts.depth,           "Max reconstruction depth");
-    BU_OPT(d[4],  "",  "kerneldepth",      "#", &bu_opt_int,       &opts.kerneldepth,     "Kernel depth");
-    BU_OPT(d[5],  "",  "iterations",       "#", &bu_opt_int,       &opts.iterations,      "Solver iterations");
-    BU_OPT(d[6],  "",  "full-depth",       "#", &bu_opt_int,       &opts.full_depth,      "Full depth");
-    BU_OPT(d[7],  "",  "base-depth",       "#", &bu_opt_int,       &opts.base_depth,      "Coarse MG depth");
-    BU_OPT(d[8],  "",  "base-vcycles",     "#", &bu_opt_int,       &opts.baseVcycles,     "Coarse MG v-cycles");
-    BU_OPT(d[9],  "",  "max-mem",          "#", &bu_opt_int,       &opts.max_memory_GB,   "Max memory (GB)");
-    BU_OPT(d[10], "",  "threads",          "#", _pnts_opt_size_t,  &opts.threads,         "Threads to use");
-    BU_OPT(d[11], "",  "samples-per-node", "#", &bu_opt_fastf_t,   &opts.samples_per_node,"Min samples per node");
-    BU_OPT(d[12], "",  "scale",            "#", &bu_opt_fastf_t,   &opts.scale,           "Scale factor");
-    BU_OPT(d[13], "",  "width",            "#", &bu_opt_fastf_t,   &opts.width,           "Voxel width");
-    BU_OPT(d[14], "",  "confidence",       "#", &bu_opt_fastf_t,   &opts.confidence,      "Normal confidence exponent");
-    BU_OPT(d[15], "",  "confidence-bias",  "#", &bu_opt_fastf_t,   &opts.confidence_bias, "Normal confidence bias exponent");
-    BU_OPT(d[16], "",  "cg-accuracy",      "#", &bu_opt_fastf_t,   &opts.cgsolver_accuracy,"CG solver accuracy");
-    BU_OPT(d[17], "",  "point-weight",     "#", &bu_opt_fastf_t,   &opts.point_weight,     "Interpolation weight");
-    BU_OPT(d[18], "",  "nonmanifold",      "#", &bu_opt_int,       &opts.nonManifold,      "NonManifold (0/1)");
-    BU_OPT(d[19], "",  "linearfit",        "#", &bu_opt_int,       &opts.linearFit,        "Linear Fit (0/1)");
-    BU_OPT(d[20], "",  "exact",            "#", &bu_opt_int,       &opts.exact,            "Exact interpolation (0/1)");
-    BU_OPT_NULL(d[21]);
+    struct bu_opt_desc d[16];
+    BU_OPT(d[0],  "h", "help",             "",  NULL,            &print_help,            "Print help and exit");
+    BU_OPT(d[1],  "",  "depth",            "#", &bu_opt_int,     &opts.depth,            "Max reconstruction depth");
+    BU_OPT(d[2],  "",  "kerneldepth",      "#", &bu_opt_int,     &opts.kerneldepth,      "Kernel depth");
+    BU_OPT(d[3],  "",  "iterations",       "#", &bu_opt_int,     &opts.iterations,       "Solver iterations");
+    BU_OPT(d[4],  "",  "full-depth",       "#", &bu_opt_int,     &opts.full_depth,       "Full depth");
+    BU_OPT(d[5],  "",  "base-depth",       "#", &bu_opt_int,     &opts.base_depth,       "Coarse MG depth");
+    BU_OPT(d[6],  "",  "base-vcycles",     "#", &bu_opt_int,     &opts.baseVcycles,      "Coarse MG v-cycles");
+    BU_OPT(d[7],  "",  "samples-per-node", "#", &bu_opt_fastf_t, &opts.samples_per_node, "Min samples per node");
+    BU_OPT(d[8],  "",  "scale",            "#", &bu_opt_fastf_t, &opts.scale,            "Scale factor");
+    BU_OPT(d[9],  "",  "width",            "#", &bu_opt_fastf_t, &opts.width,            "Voxel width");
+    BU_OPT(d[10], "",  "cg-accuracy",      "#", &bu_opt_fastf_t, &opts.cgsolver_accuracy,"CG solver accuracy");
+    BU_OPT(d[11], "",  "point-weight",     "#", &bu_opt_fastf_t, &opts.point_weight,     "Interpolation weight");
+    BU_OPT(d[12], "",  "nonmanifold",      "#", &bu_opt_int,     &opts.nonManifold,      "NonManifold (0/1)");
+    BU_OPT(d[13], "",  "linearfit",        "#", &bu_opt_int,     &opts.linearFit,        "Linear Fit (0/1)");
+    BU_OPT(d[14], "",  "exact",            "#", &bu_opt_int,     &opts.exact,            "Exact interpolation (0/1)");
+    BU_OPT_NULL(d[15]);
 
     argc -= (argc>0); argv += (argc>0); // skip "spsr"
     if (argc < 1) {
@@ -581,7 +562,18 @@ _ged_pnts_tri_cmd_spsr(void *bs, int argc, const char **argv)
     point_t *overts = NULL;
     int nverts = 0;
 
-    int sret = bg_3d_spsr(&faces, &nfaces, &overts, &nverts, (const point_t *)ipts, (const vect_t *)inrms, pcnt, &opts);
+    std::vector<struct bg_3d_spsr_sample> samples(
+	static_cast<size_t>(pcnt));
+    for (size_t i = 0; i < samples.size(); i++) {
+	VMOVE(samples[i].point, ipts[i]);
+	VMOVE(samples[i].normal, inrms[i]);
+    }
+    struct bg_3d_spsr_adaptive_opts adaptive_options =
+	BG_3D_SPSR_ADAPTIVE_OPTS_DEFAULT;
+    adaptive_options.solver = opts;
+    adaptive_options.max_refinement_passes = 0;
+    int sret = bg_3d_spsr_adaptive(&faces, &nfaces, &overts, &nverts,
+	samples.data(), samples.size(), &adaptive_options, NULL, NULL, NULL);
 
     // free inputs
     if (ipts)
@@ -1054,19 +1046,22 @@ _ged_pnts_cmd_write(void *bs, int argc, const char **argv)
     struct bu_vls pnt_str = BU_VLS_INIT_ZERO;
     const char *pnt_prim = NULL;
     const char *filename = NULL;
-    const char *usage = "Usage: pnts write [options] <pnts_obj> <output_file>\n\nWrites out data based on the point type, one row per point, using a format of x y z [i j k] [scale] [R G B] (bracketed groups may or may not be present depending on point type.)\n\n";
-    struct bu_opt_desc d[4];
+    const char *usage = "Usage: pnts write [options] <pnts_obj> <output_file>\n\nWrites out data based on the point type, one row per point, using a format of x y z [i j k] [scale] [R G B] (bracketed groups may or may not be present depending on point type.)  Use -f/--format to restrict the output fields (currently \"xyz\" is supported for XYZ-only output).\n\n";
+    struct bu_vls fmt = BU_VLS_INIT_ZERO;
+    struct bu_opt_desc d[5];
     int precis = 0;
-    BU_OPT(d[0], "h", "help",      "",   NULL,         &print_help,   "Print help and exit");
-    BU_OPT(d[1], "p", "precision", "#",  &bu_opt_int,  &precis,       "Number of digits after decimal to use when printing out numbers (default 17)");
-    BU_OPT(d[2], "",  "ply",       "",   NULL,         &ply_out,      "Write output using PLY format instead of x y z [i j k] [scale] [R G B] text file");
-    BU_OPT_NULL(d[3]);
+    BU_OPT(d[0], "h", "help",      "",     NULL,         &print_help,   "Print help and exit");
+    BU_OPT(d[1], "p", "precision", "#",    &bu_opt_int,  &precis,       "Number of digits after decimal to use when printing out numbers (default 17)");
+    BU_OPT(d[2], "",  "ply",       "",     NULL,         &ply_out,      "Write output using PLY format instead of x y z [i j k] [scale] [R G B] text file");
+    BU_OPT(d[3], "f", "format",    "[xyz]", &bu_opt_vls, &fmt,          "Format of output data (currently supports xyz for XYZ-only output)");
+    BU_OPT_NULL(d[4]);
 
     argc-=(argc>0); argv+=(argc>0); /* skip command name argv[0] */
 
     /* must be wanting help */
     if (argc < 1) {
 	_ged_cmd_help(gedp, usage, d);
+	bu_vls_free(&fmt);
 	return BRLCAD_OK;
     }
 
@@ -1075,6 +1070,7 @@ _ged_pnts_cmd_write(void *bs, int argc, const char **argv)
 
     if (print_help) {
 	_ged_cmd_help(gedp, usage, d);
+	bu_vls_free(&fmt);
 	return BRLCAD_OK;
     }
 
@@ -1083,6 +1079,7 @@ _ged_pnts_cmd_write(void *bs, int argc, const char **argv)
 
     if (argc != 2) {
 	_ged_cmd_help(gedp, usage, d);
+	bu_vls_free(&fmt);
 	return BRLCAD_ERROR;
     }
 
@@ -1091,6 +1088,7 @@ _ged_pnts_cmd_write(void *bs, int argc, const char **argv)
 
     if (bu_file_exists(filename, NULL)) {
 	bu_vls_sprintf(gedp->ged_result_str, "Error: file %s already exists\n", filename);
+	bu_vls_free(&fmt);
 	return BRLCAD_ERROR;
     }
 
@@ -1101,6 +1099,7 @@ _ged_pnts_cmd_write(void *bs, int argc, const char **argv)
     if (intern.idb_major_type != DB5_MAJORTYPE_BRLCAD || intern.idb_minor_type != DB5_MINORTYPE_BRLCAD_PNTS) {
 	bu_vls_printf(gedp->ged_result_str, "pnts write: %s is not a pnts object!", pnt_prim);
 	rt_db_free_internal(&intern);
+	bu_vls_free(&fmt);
 	return BRLCAD_ERROR;
     }
 
@@ -1110,8 +1109,83 @@ _ged_pnts_cmd_write(void *bs, int argc, const char **argv)
     if (pnts->type == RT_PNT_UNKNOWN) {
 	bu_vls_sprintf(gedp->ged_result_str, "Error: unknown pnts type\n");
 	rt_db_free_internal(&intern);
+	bu_vls_free(&fmt);
 	return BRLCAD_ERROR;
     }
+
+    /* If an output format was requested, validate it against the object's
+     * available fields and, for the XYZ-only case, short-circuit the per-type
+     * branches below.  This keeps the default (no -f) path byte-for-byte
+     * identical to the historical behavior. */
+    if (bu_vls_strlen(&fmt)) {
+	const char *fc = bu_vls_addr(&fmt);
+	int req_pnt = (strchr(fc, 'x') || strchr(fc, 'y') || strchr(fc, 'z'));
+	int req_nrm = (strchr(fc, 'i') || strchr(fc, 'j') || strchr(fc, 'k'));
+	int req_sca = (strchr(fc, 's') != NULL);
+	int req_col = (strchr(fc, 'r') || strchr(fc, 'g') || strchr(fc, 'b'));
+	int obj_has_nrm = (pnts->type == RT_PNT_TYPE_NRM || pnts->type == RT_PNT_TYPE_SCA_NRM
+			   || pnts->type == RT_PNT_TYPE_COL_NRM || pnts->type == RT_PNT_TYPE_COL_SCA_NRM);
+	int obj_has_sca = (pnts->type == RT_PNT_TYPE_SCA || pnts->type == RT_PNT_TYPE_SCA_NRM
+			   || pnts->type == RT_PNT_TYPE_COL_SCA || pnts->type == RT_PNT_TYPE_COL_SCA_NRM);
+	int obj_has_col = (pnts->type == RT_PNT_TYPE_COL || pnts->type == RT_PNT_TYPE_COL_SCA
+			   || pnts->type == RT_PNT_TYPE_COL_NRM || pnts->type == RT_PNT_TYPE_COL_SCA_NRM);
+
+	if (ply_out) {
+	    bu_vls_sprintf(gedp->ged_result_str, "Error: -f/--format cannot be combined with --ply\n");
+	    rt_db_free_internal(&intern);
+	    bu_vls_free(&fmt);
+	    return BRLCAD_ERROR;
+	}
+
+	/* Reject requests for fields the object does not carry. */
+	if ((req_nrm && !obj_has_nrm) || (req_sca && !obj_has_sca) || (req_col && !obj_has_col)) {
+	    bu_vls_sprintf(gedp->ged_result_str, "Error: requested format \"%s\" includes fields not present in pnts object %s\n", fc, pnt_prim);
+	    rt_db_free_internal(&intern);
+	    bu_vls_free(&fmt);
+	    return BRLCAD_ERROR;
+	}
+
+	/* Currently only XYZ-only output is supported (i/j/k, scale and rgb
+	 * selective output is deferred).  Anything beyond xyz is unsupported. */
+	if (!req_pnt || req_nrm || req_sca || req_col) {
+	    bu_vls_sprintf(gedp->ged_result_str, "Error: unsupported format \"%s\" (currently only \"xyz\" is supported for output)\n", fc);
+	    rt_db_free_internal(&intern);
+	    bu_vls_free(&fmt);
+	    return BRLCAD_ERROR;
+	}
+
+	/* XYZ-only: all pnt structs share (struct bu_list l; point_t v;) as
+	 * their leading members, so we can treat any point type as a plain
+	 * struct pnt for the purpose of emitting v[0..2]. */
+	fp = fopen(filename, "wb+");
+	if (fp == NULL) {
+	    bu_vls_sprintf(gedp->ged_result_str, "Error: cannot open file %s for writing\n", filename);
+	    rt_db_free_internal(&intern);
+	    bu_vls_free(&fmt);
+	    return BRLCAD_ERROR;
+	}
+	{
+	    struct pnt *pn = NULL;
+	    struct pnt *pl = (struct pnt *)pnts->point;
+	    for (BU_LIST_FOR(pn, pnt, &(pl->l))) {
+		int i = 0;
+		for (i = 0; i < 3; i++) {
+		    _pnts_fastf_t_to_vls(&pnt_str, pn->v[i], precis);
+		    if (i != 2) {
+			fprintf(fp, "%s ", bu_vls_addr(&pnt_str));
+		    } else {
+			fprintf(fp, "%s\n", bu_vls_addr(&pnt_str));
+		    }
+		}
+	    }
+	}
+	rt_db_free_internal(&intern);
+	fclose(fp);
+	bu_vls_free(&fmt);
+	return BRLCAD_OK;
+    }
+
+    bu_vls_free(&fmt);
 
     /* Write points */
     fp = fopen(filename, "wb+");

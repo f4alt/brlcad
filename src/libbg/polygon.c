@@ -22,6 +22,7 @@
 
 #include <bio.h>
 
+#include "bn/mat.h"
 #include "bu/malloc.h"
 #include "bu/sort.h"
 #include "bg/plane.h"
@@ -82,7 +83,7 @@ bg_polygon_view_bbox(point2d_t *bmin, point2d_t *bmax, struct bg_polygon *p, mat
     // contours.  ONLY considering positive contour points.
     for (size_t i = 0; i < p->num_contours; i++) {
 	struct bg_poly_contour *c = &p->contour[i];
-	if (!c->num_points)
+	if ((p->hole && p->hole[i]) || !c->num_points)
 	    continue;
 	for (size_t j = 0; j < c->num_points; j++) {
 	    point_t vpoint;
@@ -142,64 +143,64 @@ bg_3d_polygon_area(fastf_t *area, size_t npts, const point_t *pts)
 int
 bg_3d_polygon_centroid(point_t *cent, size_t npts, const point_t *pts)
 {
-    size_t i;
-    fastf_t x_0 = 0.0;
-    fastf_t x_1 = 0.0;
-    fastf_t y_0 = 0.0;
-    fastf_t y_1 = 0.0;
-    fastf_t z_0 = 0.0;
-    fastf_t z_1 = 0.0;
-    fastf_t a = 0.0;
-    fastf_t signedArea = 0.0;
+    point_t centroid = VINIT_ZERO;
+    vect_t normal = VINIT_ZERO;
+    vect_t edge0, edge1, cross;
+    fastf_t signed_area = 0.0;
 
     if (!pts || !cent || npts < 3)
 	return 1;
-    /* Calculate Centroid projection for face for x-y-plane */
-    for (i = 0; i < npts-1; i++) {
-	x_0 = pts[i][0];
-	y_0 = pts[i][1];
-	x_1 = pts[i+1][0];
-	y_1 = pts[i+1][1];
-	a = x_0 *y_1 - x_1*y_0;
-	signedArea += a;
-	*cent[0] += (x_0 + x_1)*a;
-	*cent[1] += (y_0 + y_1)*a;
+
+    for (size_t i = 1; i + 1 < npts; i++) {
+	VSUB2(edge0, pts[i], pts[0]);
+	VSUB2(edge1, pts[i + 1], pts[0]);
+	VCROSS(cross, edge0, edge1);
+	VADD2(normal, normal, cross);
     }
-    x_0 = pts[i][0];
-    y_0 = pts[i][1];
-    x_1 = pts[0][0];
-    y_1 = pts[0][1];
-    a = x_0 *y_1 - x_1*y_0;
-    signedArea += a;
-    *cent[0] += (x_0 + x_1)*a;
-    *cent[1] += (y_0 + y_1)*a;
+    if (MAGNITUDE(normal) <= SMALL_FASTF)
+	return 1;
+    VUNITIZE(normal);
 
-    signedArea *= 0.5;
-    *cent[0] /= (6.0*signedArea);
-    *cent[1] /= (6.0*signedArea);
+    for (size_t i = 1; i + 1 < npts; i++) {
+	point_t triangle_centroid;
+	fastf_t triangle_area;
 
-    /* calculate Centroid projection for face for x-z-plane */
-
-    signedArea = 0.0;
-    for (i = 0; i < npts-1; i++) {
-	x_0 = pts[i][0];
-	z_0 = pts[i][2];
-	x_1 = pts[i+1][0];
-	z_1 = pts[i+1][2];
-	a = x_0 *z_1 - x_1*z_0;
-	signedArea += a;
-	*cent[2] += (z_0 + z_1)*a;
+	VSUB2(edge0, pts[i], pts[0]);
+	VSUB2(edge1, pts[i + 1], pts[0]);
+	VCROSS(cross, edge0, edge1);
+	triangle_area = VDOT(cross, normal);
+	signed_area += triangle_area;
+	VADD2(triangle_centroid, pts[0], pts[i]);
+	VADD2(triangle_centroid, triangle_centroid, pts[i + 1]);
+	VSCALE(triangle_centroid, triangle_centroid, triangle_area / 3.0);
+	VADD2(centroid, centroid, triangle_centroid);
     }
-    x_0 = pts[i][0];
-    z_0 = pts[i][2];
-    x_1 = pts[0][0];
-    z_1 = pts[0][2];
-    a = x_0 *z_1 - x_1*z_0;
-    signedArea += a;
-    *cent[2] += (z_0 + z_1)*a;
 
-    signedArea *= 0.5;
-    *cent[2] /= (6.0*signedArea);
+    if (NEAR_ZERO(signed_area, SMALL_FASTF))
+	return 1;
+
+    VSCALE(centroid, centroid, 1.0 / signed_area);
+    VMOVE(*cent, centroid);
+
+    return 0;
+}
+
+
+static int
+append_plane_point(size_t *count, point_t *points, size_t capacity,
+	const point_t point)
+{
+    size_t i;
+
+    for (i = 0; i < *count; i++) {
+	if (VNEAR_EQUAL(points[i], point, BN_TOL_DIST))
+	    return 0;
+    }
+    if (*count >= capacity)
+	return 1;
+
+    VMOVE(points[*count], point);
+    (*count)++;
     return 0;
 }
 
@@ -229,9 +230,11 @@ bg_3d_polygon_make_pnts_planes(size_t *npts, point_t **pts, size_t neqs, const p
 		}
 		/* found a good point, add it to each of the intersecting faces */
 		if (keep_point) {
-		    VMOVE(pts[i][npts[i]], (pt)); npts[i]++;
-		    VMOVE(pts[j][npts[j]], (pt)); npts[j]++;
-		    VMOVE(pts[k][npts[k]], (pt)); npts[k]++;
+		    size_t capacity = neqs - 1;
+		    if (append_plane_point(&npts[i], pts[i], capacity, pt) ||
+			    append_plane_point(&npts[j], pts[j], capacity, pt) ||
+			    append_plane_point(&npts[k], pts[k], capacity, pt))
+			return 1;
 		}
 	    }
 	}
@@ -240,12 +243,42 @@ bg_3d_polygon_make_pnts_planes(size_t *npts, point_t **pts, size_t neqs, const p
 }
 
 
+struct sort_ccw_data {
+    point_t centroid;
+    vect_t x_axis;
+    vect_t y_axis;
+};
+
+
 static int
-sort_ccw_3d(const void *x, const void *y, void *cmp)
+sort_ccw_3d(const void *left, const void *right, void *context)
 {
-    vect_t tmp;
-    VCROSS(tmp, ((fastf_t *)x), ((fastf_t *)y));
-    return VDOT(*((point_t *)cmp), tmp);
+    const struct sort_ccw_data *data = (const struct sort_ccw_data *)context;
+    const point_t *left_point = (const point_t *)left;
+    const point_t *right_point = (const point_t *)right;
+    vect_t left_offset, right_offset;
+    double left_angle, right_angle;
+    double left_radius, right_radius;
+
+    VSUB2(left_offset, *left_point, data->centroid);
+    VSUB2(right_offset, *right_point, data->centroid);
+    left_angle = atan2(VDOT(left_offset, data->y_axis),
+	    VDOT(left_offset, data->x_axis));
+    right_angle = atan2(VDOT(right_offset, data->y_axis),
+	    VDOT(right_offset, data->x_axis));
+
+    if (left_angle < right_angle)
+	return -1;
+    if (left_angle > right_angle)
+	return 1;
+
+    left_radius = MAGSQ(left_offset);
+    right_radius = MAGSQ(right_offset);
+    if (left_radius < right_radius)
+	return -1;
+    if (left_radius > right_radius)
+	return 1;
+    return 0;
 }
 
 
@@ -253,29 +286,25 @@ int
 bg_3d_polygon_sort_ccw(size_t npts, point_t *pts, plane_t cmp)
 {
     size_t i;
-    point_t centroid;
+    vect_t normal;
+    struct sort_ccw_data data;
 
-    if (!pts || npts < 3)
+    if (!pts || !cmp || npts < 3)
+	return 1;
+    if (MAGNITUDE(cmp) < VDIVIDE_TOL)
 	return 1;
 
-    /* Compute the centroid of all points.  The sort_ccw_3d comparator
-     * measures angles using cross products of the raw position vectors,
-     * which is equivalent to sorting by angle around the *origin*.  For
-     * faces not centred at the origin the resulting order can be wrong
-     * (self-intersecting polygon), so translate all points to be centred
-     * at the origin before sorting and translate back afterwards.        */
-    VSETALL(centroid, 0.0);
-    for (i = 0; i < npts; i++)
-	VADD2(centroid, centroid, pts[i]);
-    VSCALE(centroid, centroid, 1.0 / (double)npts);
+    VMOVE(normal, cmp);
+    VUNITIZE(normal);
+    bn_vec_ortho(data.x_axis, normal);
+    VCROSS(data.y_axis, normal, data.x_axis);
 
+    VSETALL(data.centroid, 0.0);
     for (i = 0; i < npts; i++)
-	VSUB2(pts[i], pts[i], centroid);
+	VADD2(data.centroid, data.centroid, pts[i]);
+    VSCALE(data.centroid, data.centroid, 1.0 / (fastf_t)npts);
 
-    bu_sort(pts, npts, sizeof(point_t), sort_ccw_3d, &cmp);
-
-    for (i = 0; i < npts; i++)
-	VADD2(pts[i], pts[i], centroid);
+    bu_sort(pts, npts, sizeof(point_t), sort_ccw_3d, &data);
 
     return 0;
 }

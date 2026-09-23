@@ -32,6 +32,8 @@
 #include <math.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 #include "bio.h"
 
 /* interface headers */
@@ -729,6 +731,7 @@ process_point_entities_code(int code)
 static int
 process_entities_polyline_vertex_code(int code)
 {
+    enum { INVALID_FACE_INDEX = -1 };
     static fastf_t x, y, z;
     static int face[4];
     static int vertex_flag;
@@ -754,22 +757,48 @@ process_entities_polyline_vertex_code(int code)
 	case 71:
 	case 72:
 	case 73:
-	case 74:
-	    coord = (code % 70) - 1;
-	    face[coord] = abs(atoi(line));
+	case 74: {
+	    char *endptr;
+	    long index;
+
+	    coord = code - 71;
+	    errno = 0;
+	    index = strtol(line, &endptr, 10);
+	    if (endptr != line && errno != ERANGE && index >= -INT_MAX && index <= INT_MAX) {
+		while (isspace((unsigned char)*endptr))
+		    endptr++;
+		if (!*endptr) {
+		    face[coord] = (int)(index < 0 ? -index : index);
+		    break;
+		}
+	    }
+	    face[coord] = INVALID_FACE_INDEX;
 	    break;
+	}
 	case 0:
 	    get_layer();
 	    if (vertex_flag == POLY_VERTEX_FACE) {
-		add_triangle(polyline_vert_indices[face[0]-1],
-			     polyline_vert_indices[face[1]-1],
-			     polyline_vert_indices[face[2]-1],
-			     curr_layer);
-		if (face[3] > 0) {
-		    add_triangle(polyline_vert_indices[face[2]-1],
+		int corner_count = face[3] ? 4 : 3;
+		int i;
+
+		for (i = 0; i < corner_count; i++) {
+		    if (face[i] < 1 || face[i] > polyline_vert_indices_count)
+			break;
+		}
+		if (i < corner_count) {
+		    bu_log("Invalid POLYLINE face indices (%d, %d, %d, %d) for %d vertices; skipping face\n",
+			   face[0], face[1], face[2], face[3], polyline_vert_indices_count);
+		} else {
+		    add_triangle(polyline_vert_indices[face[0]-1],
+				 polyline_vert_indices[face[1]-1],
+				 polyline_vert_indices[face[2]-1],
+				 curr_layer);
+		    if (face[3] > 0) {
+			add_triangle(polyline_vert_indices[face[2]-1],
 				 polyline_vert_indices[face[3]-1],
 				 polyline_vert_indices[face[0]-1],
 				 curr_layer);
+		    }
 		}
 	    } else if (vertex_flag & POLY_VERTEX_3D_M) {
 		point_t tmp_pt1, tmp_pt2;
@@ -3399,7 +3428,7 @@ main(int argc, char *argv[])
 	    tmp_rgb = &rgb[layers[i]->color_number*3];
 	    bu_vls_printf(&comb_name, "%s.c.%d", layers[i]->name, i);
 	    if (mk_comb(out_fp, bu_vls_addr(&comb_name), &head, 1, NULL, NULL,
-			tmp_rgb, 1, 0, 1, 100, 0, 0, 0)) {
+			tmp_rgb, 1, 0, 0, 100, 0, 0, 0)) {
 		bu_log("Failed to make region %s\n", layers[i]->name);
 	    } else {
 		(void)mk_addmember(bu_vls_addr(&comb_name), &head_all, NULL, WMOP_UNION);

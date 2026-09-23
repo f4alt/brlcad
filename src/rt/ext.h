@@ -125,6 +125,7 @@ extern int cur_pixel;			/* current pixel number, 0..last_pixel */
 extern int fullfloat_mode;
 extern int hypersample;			/* number of extra rays to fire */
 extern int incr_mode;			/* !0 for incremental resolution */
+extern int deterministic_jitter;	/* seed cell jitter by pixel instead of worker */
 extern int last_pixel;			/* last pixel number */
 extern int per_processor_chunk;		/* work chunk size */
 extern int full_incr_mode;              /* !0 for fully incremental resolution */
@@ -173,6 +174,7 @@ extern int curframe;			/* current frame number */
 extern int desiredframe;		/* frame to start at */
 extern int finalframe;			/* frame to halt at */
 extern int matflag;			/* read matrix from stdin */
+extern int orientflag;			/* 1 means orientation has been set */
 extern int pix_end;			/* pixel to end at */
 extern int pix_start;			/* pixel to start at */
 /***** end variables shared with do.c *****/

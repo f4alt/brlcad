@@ -3,16 +3,22 @@ brlcad_find_package(manifold REQUIRED)
 set(FACETIZE_LIBS libged libbu manifold::manifold)
 
 add_subdirectory(subprocess)
+add_subdirectory(tests)
 
 set(
   FACETIZE_SRCS
   brep.cpp
   facetize.cpp
   nmg.cpp
+  orchestrator.cpp
   plan.cpp
+  process.cpp
   regions.cpp
+  transfer.cpp
   tri.cpp
   util.cpp
+  validation.cpp
+  worker.cpp
 )
 
 ged_plugin_library(ged-facetize
@@ -25,24 +31,15 @@ ged_plugin_library(ged-facetize
 # Plugin requires subprocess to work
 add_dependencies(ged-facetize ged_exec facetize_process)
 
-# Old version of facetize
-set(OLD_FACETIZE_SRCS
-  old_facetize.cpp
-  old_facetize_log.c
-)
-
-ged_plugin_library(ged-old_facetize
-  ${OLD_FACETIZE_SRCS}
-  INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}
-  LIBS ${FACETIZE_LIBS}
-)
-
 cmakefiles(
   CMakeLists.txt
   tess_opts.h
   ged_facetize.h
-  old_facetize.h
-  subprocess.h
+  orchestrator.h
+  process.h
+  transfer.h
+  validation.h
+  worker.h
   TODO
 )
 

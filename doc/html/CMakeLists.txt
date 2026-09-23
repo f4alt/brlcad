@@ -1,18 +1,10 @@
-set(toplevel_HTML bookmarks.html toc.html)
+set(toplevel_HTML bookmarks.html)
 add_doc(toplevel_HTML html REQUIRED "mged")
 
 set(
   cadwidgets_HTML
   manuals/cadwidgets/Command.html
-  manuals/cadwidgets/Database.html
-  manuals/cadwidgets/Db.html
-  manuals/cadwidgets/Display.html
-  manuals/cadwidgets/Dm.html
-  manuals/cadwidgets/Drawable.html
-  manuals/cadwidgets/Mged.html
-  manuals/cadwidgets/QuadDisplay.html
   manuals/cadwidgets/Splash.html
-  manuals/cadwidgets/View.html
   manuals/cadwidgets/contents.html
   manuals/cadwidgets/index.html
   manuals/cadwidgets/skeleton.html
@@ -222,6 +214,7 @@ add_doc(ReleaseNotes/Rel6.0/index.html html/ReleaseNotes/Rel6.0 REQUIRED "mged")
 set(
   html_ignore_files
   CMakeLists.txt
+  toc.html
   ReleaseNotes/Rel6.0/index.html
   manuals/shaders/camo.html
   manuals/small-eagleCAD.ico

@@ -459,6 +459,32 @@ vol_from_file(const struct bu_mapped_file* mfile, size_t xdim, size_t ydim, size
 }
 
 
+static int
+vol_file_path(struct bu_vls *path, const char *filename,
+	const struct db_i *dbip)
+{
+    if (!path || !filename)
+	return 0;
+
+    if (bu_file_readable(filename)) {
+	bu_vls_strcpy(path, filename);
+	return 1;
+    }
+
+    if (!dbip || !dbip->dbi_filepath)
+	return 0;
+
+    for (char * const *prefix = dbip->dbi_filepath; *prefix; prefix++) {
+	bu_vls_sprintf(path, "%s%c%s", *prefix, BU_DIR_SEPARATOR, filename);
+	if (bu_file_readable(bu_vls_cstr(path)))
+	    return 1;
+    }
+
+    bu_vls_trunc(path, 0);
+    return 0;
+}
+
+
 /**
  * Read VOL data from external file
  * Returns :
@@ -471,16 +497,16 @@ vol_file_data(struct rt_vol_internal *vip, const struct db_i *dbip)
     size_t nbytes;
     struct bu_mapped_file* mfile = NULL;
     const char* filename = vip->name;
+    struct bu_vls filepath = BU_VLS_INIT_ZERO;
 
-    /* try to open the file. If it can't be found, look in the parent file's dir */
-    if (!bu_file_readable(filename) && dbip && dbip->dbi_filepath) {
-	/* dbip is optional for V4 and below */
-	mfile = bu_open_mapped_file_with_path(dbip->dbi_filepath, filename, "vol");
-    } else {
-	mfile = bu_open_mapped_file(filename, "vol");
+    /* Callers decide whether unavailable data is fatal. */
+    if (!vol_file_path(&filepath, filename, dbip)) {
+	bu_vls_free(&filepath);
+	return 1;
     }
 
-    /* make sure we got something */
+    mfile = bu_open_mapped_file(bu_vls_cstr(&filepath), "vol");
+    bu_vls_free(&filepath);
     if (!mfile) {
 	bu_log("ERROR: unable to open data file: '%s'\n", filename);
 	return 1;
@@ -764,7 +790,7 @@ get_vol_data(struct rt_vol_internal *vip, const struct db_i *dbip)
 
     if (dbip)
 	bu_log("%s", dbip->dbi_filename);
-    return 0; //temporary
+    return 1;
 }
 
 C_DECL int
@@ -842,8 +868,9 @@ rt_vol_import5(struct rt_db_internal *ip, const struct bu_external *ep, const fa
     /* Apply any modeling transforms to get final matrix */
     rt_vol_mat(ip, mat, ip);
 
-    if (get_vol_data(vip, dbip) == 1)
-	bu_log("Couldn't find the associated file/object %s",vip->name);
+    /* Loading is best effort.  Prep retries and reports an unavailable
+     * source, allowing a VOL to become usable if its data appears later. */
+    (void)get_vol_data(vip, dbip);
 
     return 0;
 }
@@ -1001,6 +1028,14 @@ rt_vol_prep(struct soltab *stp, struct rt_db_internal *ip, struct rt_i *rtip)
 
     vip = (struct rt_vol_internal *)ip->idb_ptr;
     RT_VOL_CK_MAGIC(vip);
+
+    if (!vip->map &&
+	(get_vol_data(vip, rtip ? rtip->rti_dbip : NULL) != 0 || !vip->map))
+    {
+	bu_log("vol(%s): data source '%s' is unavailable\n", stp->st_name,
+		vip->name);
+	return 1;
+    }
 
     BU_GET(volp, struct rt_vol_specific);
     volp->vol_i = *vip;		/* struct copy */

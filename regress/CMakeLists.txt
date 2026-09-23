@@ -23,6 +23,9 @@ add_subdirectory(asc)
 # Bag of Triangles Tests
 add_subdirectory(bots)
 
+# Procedural building shape generator Regression Tests
+add_subdirectory(building)
+
 # comgeom Conversion Tests
 add_subdirectory(comgeom)
 
@@ -31,6 +34,9 @@ add_subdirectory(coverage)
 
 # DSP Regression Tests
 add_subdirectory(dsp)
+
+# DXF importer face index tests
+add_subdirectory(dxf)
 
 # Fuzz tests (if supported by the compiler)
 add_subdirectory(fuzz)
@@ -71,6 +77,9 @@ add_subdirectory(moss)
 # NACA 4/5/6 wing generator Regression Tests
 add_subdirectory(naca456)
 
+# NASTRAN converter regression tests
+add_subdirectory(nastran)
+
 # NIRT Regression Tests
 add_subdirectory(nirt)
 
@@ -100,6 +109,10 @@ add_subdirectory(rtedge)
 
 # RtWizard Image Generation Regression Tests
 add_subdirectory(rtwizard)
+
+# Shared GUI test support and Xmin fixtures
+add_subdirectory(gui)
+add_subdirectory(xmin)
 
 # per-primitive validity
 add_subdirectory(rt_primitives)

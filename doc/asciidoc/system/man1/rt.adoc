@@ -56,8 +56,12 @@ The following options are recognized:
 selects auto-sizing, and gives the view azimuth in degrees. Used with *-e* and conflicts with *-M* .
 
 
-*-b "# #"*, *--single-pixel # #*::
-is sometimes useful for debugging. A single ray is fired at the pixel coordinates specified. This is best when accompanied by debugging options. Note that the standard *getopt*(3) routine only allows options to have one parameter, so the X and Y pixel coordinates need to be combined into one string parameter by enclosing them in double quotes. This option must follow any viewing parameters.
+*-b #*, *-b "# #"*, *--single-pixel #*, *--single-pixel "# #"*::
+is sometimes useful for debugging. A single ray is fired at the specified
+linear pixel index or X and Y pixel coordinates. This is best when
+accompanied by debugging options. Because *getopt*(3) only allows one option
+parameter, coordinate pairs must be enclosed in double quotes. This option
+must follow any viewing parameters.
 
 
 *-c "script_command"*, *--command "script_command"*::
@@ -189,7 +193,7 @@ sets the distance from the eye point to the center of the model RPP; default is 
 
 
 *-F framebuffer*, *--framebuffer*::
-indicates that the output should be sent to the indicated framebuffer. For remote framebuffer access, this may be a TCP-style specification (for example, _host:port_ or _port_) or an IPC address using the form *ipc:*_addr_. See *libfb*(3) for more details on framebuffer naming.
+indicates that the output should be sent to the indicated framebuffer. For remote framebuffer access, this may be a TCP-style specification (for example, _host:port_ or _port_) or an IPC address using the form *ipc:*_addr_. See *brlcad*(1) for more details on framebuffer naming.
 
 When using *fbserv* authentication, set *FBSERV_TOKEN* in the *rt* environment to the same token value used by the server. To request TLS for remote framebuffer connections (OpenSSL builds), set *FBSERV_TLS* to a non-empty value.
 
@@ -219,7 +223,7 @@ sets the NMG_debug flags to the given hexadecimalbit vector. See h/nmg.h for the
 
 
 *-O output.dpix*, *--output-double output.dpix*::
-specifies the name of a file in which to store a double-precision floating-point version of the image. *dpix-pix*(1) can be used to later convert the file to *pix*(5) format output.
+specifies the name of a file in which to store a double-precision floating-point version of the image in *dpix*(5) format. *dpix-pix*(1) can be used to later convert the file to *pix*(5) format output.
 
 
 *-P #*, *--cpus #*::
@@ -344,7 +348,7 @@ Renders with 8 hypersamples each averaging 512 ambient-occlusion samples (a brut
 [[see_also]]
 == SEE ALSO
 
-*brlcad*(1), *mged*(1), *pix-fb*(1), *png-fb*(1), *librt*(3), *pix*(5)
+*brlcad*(1), *mged*(1), *pix-fb*(1), *png-fb*(1), *librt*(3), *dpix*(5), *pix*(5)
 
 
 [[diagnostics]]

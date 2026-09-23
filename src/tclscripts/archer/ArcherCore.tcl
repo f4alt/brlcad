@@ -26,9 +26,7 @@
 LoadArcherCoreLibs
 package provide ArcherCore 1.0
 
-namespace eval ArcherCore {
-    set cursorWaitCount 0
-
+namespace eval ArcherCoreBootstrap {
     if {![info exists parentClass]} {
 	set parentClass itk::Toplevel
 	set inheritFromToplevel 1
@@ -36,7 +34,7 @@ namespace eval ArcherCore {
 }
 
 ::itcl::class ArcherCore {
-    inherit $ArcherCore::parentClass
+    inherit $::ArcherCoreBootstrap::parentClass
 
     itk_option define -quitcmd quitCmd Command {}
     itk_option define -master master Master "."
@@ -49,6 +47,7 @@ namespace eval ArcherCore {
 	common application ""
 	common splash ""
 	common showWindow 0
+	common inheritFromToplevel $::ArcherCoreBootstrap::inheritFromToplevel
 
 	common TREE_AFFECTED_TAG "affected"
 	common TREE_FULLY_DISPLAYED_TAG "displayed"
@@ -330,6 +329,7 @@ namespace eval ArcherCore {
     }
 
     protected {
+	proc getTreeLeafNames     {_tree}
 	proc unpackTreeGuts      {_tree}
 
 	variable mLastSelectedDir ""
@@ -1017,6 +1017,8 @@ namespace eval ArcherCore {
     }
 }
 
+namespace delete ::ArcherCoreBootstrap
+
 # ------------------------------------------------------------
 #                      CONSTRUCTOR
 # ------------------------------------------------------------
@@ -1067,9 +1069,9 @@ namespace eval ArcherCore {
 	command bottom -label "Bottom" \
 	    -helpstr "Set view to bottom"
 	separator sep0
-	command 35, 25 -label "35, 25" \
+	command ae_35_25 -label "35, 25" \
 	    -helpstr "Set view to az=35, el=25"
-	command 45, 45 -label "45, 45" \
+	command ae_45_45 -label "45, 45" \
 	    -helpstr "Set view to az=45, el=45"
     }
 
@@ -1510,10 +1512,10 @@ namespace eval ArcherCore {
 	$itk_component(canvas_menu) menuconfigure .view.bottom \
 	    -command [::itcl::code $this doAe 270 -90] \
 	    -state disabled
-	$itk_component(canvas_menu) menuconfigure .view.35,25 \
+	$itk_component(canvas_menu) menuconfigure .view.ae_35_25 \
 	    -command [::itcl::code $this doAe 35 25] \
 	    -state disabled
-	$itk_component(canvas_menu) menuconfigure .view.45,45 \
+	$itk_component(canvas_menu) menuconfigure .view.ae_45_45 \
 	    -command [::itcl::code $this doAe 45 45] \
 	    -state disabled
 
@@ -2046,7 +2048,7 @@ namespace eval ArcherCore {
     $itk_component(ged) transparency_all 1
     $itk_component(ged) bounds_all "-4096 4095 -4096 4095 -4096 4095"
     $itk_component(ged) more_args_callback [::itcl::code $this handleMoreArgs]
-    $itk_component(ged) history_callback [::itcl::code $this addHistory]
+    $itk_component(ged) history_callback {*}[::itcl::code $this addHistory]
 
 
     # RT Control Panel
@@ -3766,12 +3768,56 @@ namespace eval ArcherCore {
 }
 
 
+::itcl::body ArcherCore::getTreeLeafNames {_tree} {
+    if {$_tree == ""} {
+	return {}
+    }
+
+    set operator [lindex $_tree 0]
+    set tree_length [llength $_tree]
+    switch -- $operator {
+	"l" {
+	    if {$tree_length != 2 && $tree_length != 3} {
+		error "getTreeLeafNames: malformed leaf - $_tree"
+	    }
+
+	    return [list [lindex $_tree 1]]
+	}
+	"u" -
+	"+" -
+	"-" -
+	"^" {
+	    if {$tree_length != 3} {
+		error "getTreeLeafNames: malformed binary tree - $_tree"
+	    }
+
+	    return [concat \
+		[getTreeLeafNames [lindex $_tree 1]] \
+		[getTreeLeafNames [lindex $_tree 2]]]
+	}
+	"!" -
+	"G" -
+	"X" {
+	    if {$tree_length != 2} {
+		error "getTreeLeafNames: malformed unary tree - $_tree"
+	    }
+
+	    return [getTreeLeafNames [lindex $_tree 1]]
+	}
+	default {
+	    error "getTreeLeafNames: unrecognized operator - $operator"
+	}
+    }
+}
+
+
 ::itcl::body ArcherCore::getTreeMembers {_comb {_wflag 0}} {
     if {![$itk_component(ged) exists $_comb]} {
 	return ""
     }
 
-    set tlist [$itk_component(ged) lt -c " " $_comb]
+    set tree [$itk_component(ged) get $_comb tree]
+    set tlist [getTreeLeafNames $tree]
     set tlen [llength $tlist]
 
     if {$tlen >= $mMaxCombMembersShown} {
@@ -6780,9 +6826,9 @@ namespace eval ArcherCore {
 	set len [llength $line]
 
 	if {$len == 2} {
-	    return "l [lindex $line 1]"
+	    return [list l [lindex $line 1]]
 	} elseif {$len == 3} {
-	    return "l [lindex $line 1] [list [lindex $line 2]]"
+	    return [list l [lindex $line 1] [lindex $line 2]]
 	}
 
 	error "packTree: malformed data - $data"
@@ -6793,9 +6839,9 @@ namespace eval ArcherCore {
     set line [lindex $lines 0]
     set len [llength $line]
     if {$len == 2} {
-	set tree "l [lindex $line 1]"
+	set tree [list l [lindex $line 1]]
     } elseif {$len == 18} {
-	set tree "l [lindex $line 1] [list [lrange $line 2 end]]"
+	set tree [list l [lindex $line 1] [lrange $line 2 end]]
     } else {
 	#	error "packTree: malformed line - $line"
     }
@@ -6999,7 +7045,7 @@ namespace eval ArcherCore {
     }
 
     if {[llength $tree] == 2} {
-	return [lindex $tree 1]
+	return [list [lindex $tree 1]]
     }
 
     if {[llength $tree] != 3} {
@@ -7009,7 +7055,7 @@ namespace eval ArcherCore {
     set op [lindex $tree 0]
 
     if {$op == "l"} {
-	return "[lindex $tree 1]\t[lindex $tree 2]"
+	return "[list [lindex $tree 1]]\t[lindex $tree 2]"
     } else {
 	if {$op == "n"} {
 	    set op "+"

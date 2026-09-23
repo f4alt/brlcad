@@ -4,12 +4,19 @@ set(TESS_LIBS libged manifold::manifold)
 set(
   GED_TESS_SRCS
   brep_csg.cpp
-  continuation.cpp
-  sample.cpp
   spsr.cpp
   main.cpp
+  mdc.cpp
   nmg.cpp
+  nmg_boolean.cpp
   util.cpp
+  ../plan.cpp
+  ../process.cpp
+  ../tri.cpp
+  ../transfer.cpp
+  ../util.cpp
+  ../validation.cpp
+  ../worker.cpp
 )
 
 ged_subprocess_library(facetize_process
@@ -19,6 +26,7 @@ ged_subprocess_library(facetize_process
 
 cmakefiles(
   CMakeLists.txt
+  nmg_boolean.h
   tessellate.h
   ${GED_TESS_SRCS}
 )

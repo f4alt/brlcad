@@ -90,12 +90,6 @@ __END_DECLS
 
 #include "rt/edit.h"
 
-// We have to use different I/O mechanisms based on which
-// platform we're on.  Make a define to key off of.
-#if defined(_WIN32) && !defined(__CYGWIN__)
-#  define USE_TCL_CHAN
-#endif
-
 #define MGED_DB_NAME "db"
 #define MGED_INMEM_NAME ".inmem"
 
@@ -128,6 +122,7 @@ struct mged_tol {
 
 
 typedef int (*tcl_func_ptr)(ClientData, Tcl_Interp *, int, const char *[]);
+typedef void (*mged_gui_callback_t)(void *);
 
 struct cmdtab {
     uint32_t magic;
@@ -258,13 +253,17 @@ struct mged_state {
      * views need to be redrawn. */
     int update_views;
 
-    /* Asynchronous ged_exec state (cmd.cpp).
-     * cmd_running is set to 1 while ged_exec runs in a worker thread so
-     * that re-entrant command dispatch (e.g. from stdin_input) is blocked.
+    /* GED command execution state (cmd.cpp).
+     * cmd_running is set while a GED command owns the shared state so that
+     * re-entrant command dispatch is blocked.  command_state is an
+     * opaque, execution-scoped C++ object used for cooperative interrupts.
      * log_drain_timer is the recurring Tcl timer token used to flush
-     * accumulated bu_log output to the Tcl command prompt. */
+     * accumulated bu_log output to the Tcl command prompt.  gui_thread_id
+     * identifies the Tcl thread that owns Tk and the display contexts. */
     int cmd_running;
+    void *command_state;
     Tcl_TimerToken log_drain_timer;
+    Tcl_ThreadId gui_thread_id;
 
     /* Staged shutdown state.  Tcl callbacks request shutdown and return; the
      * outer MGED event loop performs final teardown after Tcl has unwound. */
@@ -286,10 +285,8 @@ struct mged_state {
      * Status codes: CMD_OK (919), CMD_BAD (920), CMD_MORE (921). */
     int pipe_mode;
 
-    /* Secondary Tcl interpreter used exclusively for search -exec evaluation.
-     * search_snapshot is captured from interp before an asynchronous search
-     * starts, then replayed when the worker creates search_interp. */
-    Tcl_Interp *search_interp;
+    /* search_snapshot is captured from interp before an asynchronous search
+     * starts, then replayed into the worker-owned search interpreter. */
     char *search_snapshot;
     int search_snapshot_len;
 };
@@ -505,6 +502,10 @@ void mged_start_log_drain_timer(struct mged_state *s);
 void mged_stop_log_drain_timer(struct mged_state *s);
 void mged_output_cleanup(void);
 int mged_ged_exec_async(struct mged_state *s, int argc, const char *argv[]);
+int mged_request_command_interrupt(struct mged_state *s);
+int mged_command_interrupted(struct mged_state *s);
+void mged_run_on_gui_thread(struct mged_state *s, mged_gui_callback_t callback,
+	void *data);
 
 /* columns.c */
 void vls_col_item(struct bu_vls *str, const char *cp);
@@ -619,7 +620,7 @@ void oedit_accept(struct mged_state *s);
 void oedit_reject(struct mged_state *s);
 void objedit_mouse(struct mged_state *s, const vect_t mousevec);
 void label_edited_solid(struct mged_state *s, int *num_lines, point_t *lines, struct rt_point_labels pl[], int max_pl, const mat_t xform, struct rt_db_internal *ip);
-void init_oedit(struct mged_state *s);
+int init_oedit(struct mged_state *s);
 void init_sedit(struct mged_state *s);
 int set_oedit_bbox_keypoint(struct mged_state *s);
 
@@ -634,6 +635,7 @@ void free_all_resources(struct mged_dm *dlp);
 extern void set_absolute_tran(struct mged_state *);
 extern void set_absolute_view_tran(struct mged_state *);
 extern void set_absolute_model_tran(struct mged_state *);
+extern void mged_fbserv_set_active_session(struct mged_dm *);
 extern void fbserv_set_port(const struct bu_structparse *, const char *, void *, const char *, void *);
 extern void set_scroll_private(const struct bu_structparse *, const char *, void *, const char *, void *);
 extern void mged_variable_setup(struct mged_state *s);

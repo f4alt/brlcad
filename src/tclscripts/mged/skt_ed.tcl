@@ -136,7 +136,7 @@ class Sketch_editor {
     private variable bezier_indices ""
     private variable selection_mode ""
     common pi2 [expr {4.0 * asin( 1.0 )}]
-    common rad2deg  [expr {360.0 / $pi2}]
+    public common rad2deg [expr {360.0 / $pi2}]
 
     constructor { args } {
 	set num_args [llength $args]
@@ -170,8 +170,8 @@ class Sketch_editor {
 		return
 	    }
 	    if { [lindex $sketch_info 0] != "sketch" } {
-		tk_messageBox -icon error -type ok -title "$name is not a sketch" \
-		    -message "$name is not a sketch"
+		tk_messageBox -icon error -type ok -title "$sketch_name is not a sketch" \
+		    -message "$sketch_name is not a sketch"
 		destroy $itk_component(hull)
 		return
 	    }
@@ -189,8 +189,8 @@ class Sketch_editor {
 		return
 	    }
 	    if { [lindex $sketch_info 0] != "sketch" } {
-		tk_messageBox -icon error -type ok -title "$name is not a sketch" \
-		    -message "$name is not a sketch"
+		tk_messageBox -icon error -type ok -title "$sketch_name is not a sketch" \
+		    -message "$sketch_name is not a sketch"
 		destroy $itk_component(hull)
 		return
 	    }
@@ -735,7 +735,8 @@ class Sketch_editor {
 	    return
 	}
 	if { [lindex $sketch_info 0] != "sketch" } {
-	    tk_messageBox -icon error -type ok -title "$name is not a sketch" -message "$name is not a sketch"
+	    tk_messageBox -icon error -type ok -title "$sketch_name is not a sketch" \
+		-message "$sketch_name is not a sketch"
 	    destroy $itk_component(hull)
 	    return
 	}
@@ -1751,7 +1752,7 @@ class Sketch_carc {
 	set ex [expr {$myscale * [lindex $end 0]}]
 	set ey [expr {-$myscale * [lindex $end 1]}]
 	if { $radius < 0.0 } {
-	    if { $vertex == $end_index } {
+	    if { $index == $end_index } {
 		return "0 0"
 	    }
 	    set normalx [expr $ex - $sx]
@@ -1767,7 +1768,7 @@ class Sketch_carc {
 	    set center [find_arc_center $sx $sy $ex $ey $tmp_radius $center_is_left]
 	    set cx [lindex $center 0]
 	    set cy [lindex $center 1]
-	    if { $vertex == $start_index } {
+	    if { $index == $start_index } {
 		set normalx [expr $sx - $cx]
 		set normaly [expr $sy - $cy]
 		set len [::dist $sx $sy $cx $cy]

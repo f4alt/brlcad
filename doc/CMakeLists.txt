@@ -13,8 +13,6 @@ set(
   README.MacOSX
   README.Windows
   README.BSD
-  README.Solaris
-  README.VAX
   checklist.txt
   description.txt
   optimization_ideas.adoc
@@ -29,6 +27,7 @@ set(
   notes/editors.txt
   notes/history.txt
   notes/hypot.txt
+  notes/itcl4_migration.txt
   notes/mater.txt
   notes/matrix.txt
   pre_BRL-CAD.bib
@@ -217,6 +216,8 @@ endif(TARGET mged)
 
 cmakefiles(
   CMakeLists.txt
+  README.Solaris
+  README.VAX
   README.adoc
   STARTERS
   STRATEGY

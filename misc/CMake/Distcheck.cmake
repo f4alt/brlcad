@@ -113,6 +113,11 @@ macro(
 
   # If we've already got a particular distcheck target, don't try to create it again.
   if(NOT TARGET distcheck-${TARGET_SUFFIX})
+    # Keep the original options for the generated CI job.  The target itself
+    # may add generator-specific arguments below, but those should not be
+    # duplicated in the workflow command.
+    set(distcheck_cmake_options_distcheck-${TARGET_SUFFIX} "${CMAKE_OPTS_IN}")
+
     # Need to set these locally so configure_file will pick them up...
     set(TARGET_SUFFIX ${TARGET_SUFFIX})
     set(CMAKE_OPTS ${CMAKE_OPTS_IN})
@@ -186,10 +191,9 @@ endmacro(create_distcheck)
 # this makes the default configuration consistent with the prepared variants.
 # The automatic bext path is still exercised by ordinary configurations that do
 # not specify BRLCAD_EXT_DIR.
-# Preserve the parent build type.  This is particularly important on Windows,
-# where the archive build reuses the parent bext tree and Debug and Release
-# binaries cannot be mixed.
-create_distcheck(default_build_type "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DBRLCAD_EXT_DIR=${BRLCAD_EXT_DIR}" "${CPACK_SOURCE_PACKAGE_FILE_NAME}" "build" "install")
+# Leave the default archive build type unspecified so it can use the project's
+# normal default independently of the parent configure.
+create_distcheck(default_build_type "-DBRLCAD_EXT_DIR=${BRLCAD_EXT_DIR}" "${CPACK_SOURCE_PACKAGE_FILE_NAME}" "build" "install")
 
 if(NOT HAVE_WINDOWS_H)
   # Reuse the bext outputs produced by the parent configure.  This is a massive
@@ -197,6 +201,8 @@ if(NOT HAVE_WINDOWS_H)
   # independently rebuilding the same external dependency set.
   create_distcheck(debug   "-DCMAKE_BUILD_TYPE=Debug -DBRLCAD_EXT_DIR=${BRLCAD_EXT_DIR}" "${CPACK_SOURCE_PACKAGE_FILE_NAME}" "build" "install")
   create_distcheck(release "-DCMAKE_BUILD_TYPE=Release -DBRLCAD_EXT_DIR=${BRLCAD_EXT_DIR}" "${CPACK_SOURCE_PACKAGE_FILE_NAME}" "build" "install")
+  create_distcheck(no_unity_debug "-DCMAKE_BUILD_TYPE=Debug -DBRLCAD_EXT_DIR=${BRLCAD_EXT_DIR} -DBRLCAD_ENABLE_UNITY_BUILD=OFF" "${CPACK_SOURCE_PACKAGE_FILE_NAME}" "build" "install")
+  create_distcheck(no_unity_release "-DCMAKE_BUILD_TYPE=Release -DBRLCAD_EXT_DIR=${BRLCAD_EXT_DIR} -DBRLCAD_ENABLE_UNITY_BUILD=OFF" "${CPACK_SOURCE_PACKAGE_FILE_NAME}" "build" "install")
   create_distcheck(enableall_debug   "-DCMAKE_BUILD_TYPE=Debug -DENABLE_ALL=ON -DBRLCAD_EXT_DIR=${BRLCAD_EXT_DIR}" "${CPACK_SOURCE_PACKAGE_FILE_NAME}" "build" "install")
   create_distcheck(enableall_release "-DCMAKE_BUILD_TYPE=Release -DENABLE_ALL=ON -DBRLCAD_EXT_DIR=${BRLCAD_EXT_DIR}" "${CPACK_SOURCE_PACKAGE_FILE_NAME}" "build" "install")
   create_distcheck(prepared_debug   "-DCMAKE_BUILD_TYPE=Debug -DBRLCAD_EXT_DIR=${BRLCAD_EXT_DIR}" "${CPACK_SOURCE_PACKAGE_FILE_NAME}" "build" "install")
@@ -233,25 +239,51 @@ distclean("${distcheck_yml_out}")
 # here what we do for the more exotic build types - we want distcheck.yml
 # to be comprehensive, so the truncated Windows set won't do.
 if(NOT HAVE_WINDOWS_H)
-  function(emit_job JOBNAME PREVJOB)
+  function(distcheck_workflow_options OUTVAR OPTIONS)
+    set(workflow_options "${OPTIONS}")
+    set(workflow_ext_dir "\${{ runner.temp }}/bext_output")
+    if(DEFINED BRLCAD_EXT_DIR AND NOT "${BRLCAD_EXT_DIR}" STREQUAL "")
+      string(
+        REPLACE "-DBRLCAD_EXT_DIR=${BRLCAD_EXT_DIR}"
+        "-DBRLCAD_EXT_DIR=${workflow_ext_dir}"
+        workflow_options
+        "${workflow_options}"
+      )
+    else()
+      string(
+        REPLACE "-DBRLCAD_EXT_DIR="
+        "-DBRLCAD_EXT_DIR=${workflow_ext_dir}"
+        workflow_options
+        "${workflow_options}"
+      )
+    endif()
+    set(${OUTVAR} "${workflow_options}" PARENT_SCOPE)
+  endfunction()
+
+  function(distcheck_workflow_build_config OUTVAR OPTIONS)
+    # Only set --config when the target explicitly selects a build type.  The
+    # default target deliberately leaves that choice to its sub-build.
+    set(workflow_config "")
+    string(REGEX MATCH "-DCMAKE_BUILD_TYPE=([^ ]+)" build_type_option "${OPTIONS}")
+    if(build_type_option)
+      string(REGEX REPLACE "^-DCMAKE_BUILD_TYPE=" "" workflow_config "${build_type_option}")
+    endif()
+    set(${OUTVAR} "${workflow_config}" PARENT_SCOPE)
+  endfunction()
+
+  function(emit_job JOBNAME PREVJOB CMAKE_OPTIONS BUILD_CONFIG JOB_SEPARATOR)
     file(APPEND ${distcheck_yml_out} "  ${JOBNAME}:\n")
     file(APPEND ${distcheck_yml_out} "    name: ${JOBNAME}\n")
-    file(APPEND ${distcheck_yml_out} "    runs-on: ubuntu-latest\n")
-    if(NOT \"${PREVJOB}\" STREQUAL \"\")
+    file(APPEND ${distcheck_yml_out} "    runs-on: ubuntu-24.04\n")
+    if(PREVJOB)
       file(APPEND ${distcheck_yml_out} "    needs: [${PREVJOB}]\n")
     endif()
     file(APPEND ${distcheck_yml_out} "    env:\n")
     file(APPEND ${distcheck_yml_out} "      DEBIAN_FRONTEND: noninteractive\n")
-    file(APPEND ${distcheck_yml_out} "    if: github.ref == 'refs/heads/main'\n")
+    file(APPEND ${distcheck_yml_out} "    if: \${{ !cancelled() && github.ref == 'refs/heads/main' }}\n")
     file(APPEND ${distcheck_yml_out} "    steps:\n")
     file(APPEND ${distcheck_yml_out} "      - name: Setup - CMake\n")
     file(APPEND ${distcheck_yml_out} "        uses: lukka/get-cmake@latest\n")
-    file(APPEND ${distcheck_yml_out} "      - name: Cache apt packages\n")
-    file(APPEND ${distcheck_yml_out} "        uses: actions/cache@v4\n")
-    file(APPEND ${distcheck_yml_out} "        with:\n")
-    file(APPEND ${distcheck_yml_out} "          path: |\n")
-    file(APPEND ${distcheck_yml_out} "            /var/cache/apt/archives\n")
-    file(APPEND ${distcheck_yml_out} "          key: \${{ runner.os }}-apt-\${{ hashFiles('.github/workflows/check.yml') }}\n")
     file(APPEND ${distcheck_yml_out} "      - name: Install apt dependencies\n")
     file(APPEND ${distcheck_yml_out} "        run: |\n")
     file(APPEND ${distcheck_yml_out} "          sudo apt-get update\n")
@@ -264,41 +296,60 @@ if(NOT HAVE_WINDOWS_H)
     else ()
       file(APPEND ${distcheck_yml_out} "          sudo apt-get install zlib1g-dev libpng-dev libjpeg-dev libtiff-dev libeigen3-dev libgdal-dev libassimp-dev libopencv-dev tcl-dev tk-dev libgl-dev libinput-dev\n\n")
     endif()
-    file(APPEND ${distcheck_yml_out} "      - name: Setup - bext\n")
-    file(APPEND ${distcheck_yml_out} "        run: |\n")
-    file(APPEND ${distcheck_yml_out} "          git clone https://github.com/BRL-CAD/bext.git\n")
-    file(APPEND ${distcheck_yml_out} "          cd bext\n")
-    file(APPEND ${distcheck_yml_out} "          echo \"sha=$(git rev-parse HEAD)\" >> $GITHUB_OUTPUT\n")
-    file(APPEND ${distcheck_yml_out} "          cd ..\n\n")
-    file(APPEND ${distcheck_yml_out} "      - name: Cache bext build outputs\n")
-    file(APPEND ${distcheck_yml_out} "        id: cache-bext\n")
-    file(APPEND ${distcheck_yml_out} "        uses: actions/cache@v4\n")
-    file(APPEND ${distcheck_yml_out} "        with:\n")
-    file(APPEND ${distcheck_yml_out} "          path: \${{ github.workspace }}/bext_output\n")
-    file(APPEND ${distcheck_yml_out} "          key: \${{ runner.os }}-bext-\${{ steps.bext-sha.outputs.sha }}\n")
     file(APPEND ${distcheck_yml_out} "      - name: Checkout\n")
     file(APPEND ${distcheck_yml_out} "        uses: actions/checkout@v6\n")
     file(APPEND ${distcheck_yml_out} "        with:\n")
     file(APPEND ${distcheck_yml_out} "          path: brlcad\n")
+    file(APPEND ${distcheck_yml_out} "      - name: Prepare bext dependencies\n")
+    file(APPEND ${distcheck_yml_out} "        uses: ./brlcad/.github/actions/prepare-bext\n")
+    file(APPEND ${distcheck_yml_out} "        with:\n")
+    file(APPEND ${distcheck_yml_out} "          platform-channel: ubuntu-24.04-\${{ runner.arch }}-release\n")
+    file(APPEND ${distcheck_yml_out} "          source-dir: \${{ github.workspace }}/brlcad\n")
+    file(APPEND ${distcheck_yml_out} "          output-dir: \${{ runner.temp }}/bext_output\n")
+    file(APPEND ${distcheck_yml_out} "          build-type: Release\n")
+    file(APPEND ${distcheck_yml_out} "          artifact-token: \${{ secrets.BEXT_ARTIFACT_TOKEN }}\n")
     file(APPEND ${distcheck_yml_out} "      - name: Directory setup\n")
     file(APPEND ${distcheck_yml_out} "        run: cmake -E make_directory build_${JOBNAME}\n")
     file(APPEND ${distcheck_yml_out} "      - name: Configure\n")
-    file(APPEND ${distcheck_yml_out} "        run: cmake -S brlcad -B build_${JOBNAME} -G Ninja -DCMAKE_BUILD_TYPE=Release -DBRLCAD_EXT_DIR=\${{ github.workspace }}/bext_output\n")
+    file(APPEND ${distcheck_yml_out} "        run: cmake -S brlcad -B build_${JOBNAME} -G Ninja ${CMAKE_OPTIONS}\n")
     file(APPEND ${distcheck_yml_out} "      - name: Build\n")
-    file(APPEND ${distcheck_yml_out} "        run: cmake --build build_${JOBNAME} --config Release --target ${JOBNAME}\n")
+    file(APPEND ${distcheck_yml_out} "        run: cmake --build build_${JOBNAME}")
+    if(NOT "${BUILD_CONFIG}" STREQUAL "")
+      file(APPEND ${distcheck_yml_out} " --config ${BUILD_CONFIG}")
+    endif()
+    file(APPEND ${distcheck_yml_out} " --target ${JOBNAME}\n")
     file(APPEND ${distcheck_yml_out} "      - name: Log\n")
     file(APPEND ${distcheck_yml_out} "        if: always()\n")
-    file(APPEND ${distcheck_yml_out} "        run: cat build_${JOBNAME}/${JOBNAME}.log\n")
-    file(APPEND ${distcheck_yml_out} "      - name: Debug if failure\n")
-    file(APPEND ${distcheck_yml_out} "        if: failure()\n")
-    file(APPEND ${distcheck_yml_out} "        uses: mxschmitt/action-tmate@v3\n\n")
+    file(APPEND ${distcheck_yml_out} "        run: cat build_${JOBNAME}/${JOBNAME}.log\n${JOB_SEPARATOR}")
   endfunction()
 
   execute_process(COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_SOURCE_DIR}/misc/CMake/distcheck_hdr.yml" "${distcheck_yml_out}")
-  set(PREV_JOB "bext")
+  # Bound the overall serial runtime while allowing all five
+  # queues to make progress independently.
+  set(DISTCHECK_LANE_COUNT 5)
+  math(EXPR DISTCHECK_LAST_LANE "${DISTCHECK_LANE_COUNT} - 1")
+  foreach(DISTCHECK_LANE RANGE 0 ${DISTCHECK_LAST_LANE})
+    set(DISTCHECK_LANE_PREVIOUS_${DISTCHECK_LANE} "bext")
+  endforeach()
+  list(LENGTH distcheck_targets DISTCHECK_TARGET_COUNT)
+  math(EXPR DISTCHECK_LAST_INDEX "${DISTCHECK_TARGET_COUNT} - 1")
+  set(DISTCHECK_INDEX 0)
   foreach(JOB ${distcheck_targets})
-    emit_job("${JOB}" "${PREV_JOB}")
-    set(PREV_JOB "${JOB}")
+    math(EXPR DISTCHECK_LANE "${DISTCHECK_INDEX} % ${DISTCHECK_LANE_COUNT}")
+    set(DISTCHECK_PREVIOUS_VARIABLE "DISTCHECK_LANE_PREVIOUS_${DISTCHECK_LANE}")
+    set(PREV_JOB "${${DISTCHECK_PREVIOUS_VARIABLE}}")
+    set(JOB_OPTIONS_VARIABLE "distcheck_cmake_options_${JOB}")
+    set(JOB_CMAKE_OPTIONS "${${JOB_OPTIONS_VARIABLE}}")
+    distcheck_workflow_options(JOB_WORKFLOW_OPTIONS "${JOB_CMAKE_OPTIONS}")
+    distcheck_workflow_build_config(JOB_BUILD_CONFIG "${JOB_CMAKE_OPTIONS}")
+    if(DISTCHECK_INDEX EQUAL DISTCHECK_LAST_INDEX)
+      set(JOB_SEPARATOR "")
+    else()
+      set(JOB_SEPARATOR "\n")
+    endif()
+    emit_job("${JOB}" "${PREV_JOB}" "${JOB_WORKFLOW_OPTIONS}" "${JOB_BUILD_CONFIG}" "${JOB_SEPARATOR}")
+    set(DISTCHECK_LANE_PREVIOUS_${DISTCHECK_LANE} "${JOB}")
+    math(EXPR DISTCHECK_INDEX "${DISTCHECK_INDEX} + 1")
   endforeach()
 
   # Now compare to .github/workflows/distcheck.yml

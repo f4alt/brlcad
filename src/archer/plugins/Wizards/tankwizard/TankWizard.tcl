@@ -34,8 +34,8 @@
 
     public {
 	# Override's for the Wizard class
-	common wizardMajorType $Archer::pluginMajorTypeWizard
-	common wizardMinorType $Archer::pluginMinorTypeMged
+	common wizardMajorType $::Archer::pluginMajorTypeWizard
+	common wizardMinorType $::Archer::pluginMinorTypeMged
 	common wizardName "Tank Wizard"
 	common wizardVersion "1.0"
 	common wizardClass TankWizard
@@ -1213,7 +1213,7 @@
     itk_component add $prefix\View {
 	::ttk::frame $itk_component($prefix).$prefix\View
     } {}
-    $buildViewFunc $itk_component($prefix\View)
+    {*}$buildViewFunc $itk_component($prefix\View)
     grid $itk_component($prefix\Arrow) -row 0 -column 0 -sticky e
     grid $itk_component($prefix\Label) -row 0 -column 1 -sticky w
     grid columnconfigure $itk_component($prefix) 1 -weight 1
@@ -2572,7 +2572,7 @@
 	D [list 0 $r2 0]
 
     set mat [mat_angles 0 [expr {90 - $gunElevation}] 0]
-    set mat [mat_xform_about_pt $mat $v]
+    set mat [mat_xform_about_pnt $mat $v]
     $archersMged put $wizardTop\_gun_tube.r comb \
 	region yes \
 	id $gunBarrelId \

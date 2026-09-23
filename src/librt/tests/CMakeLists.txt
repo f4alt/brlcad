@@ -55,14 +55,26 @@ brlcad_addexec(rt_diff diff.c "${RT_TEST_LIBS}" TEST)
 brlcad_addexec(rt_default_object default_object.c "librt;libwdb;libbu;${M_LIBRARY}" TEST)
 brlcad_add_test(NAME rt_default_object COMMAND rt_default_object)
 
+brlcad_addexec(rt_db_name db_name.c "librt;libbu" TEST)
+brlcad_add_test(NAME rt_db_name COMMAND rt_db_name)
+
 brlcad_addexec(rt_bound_internal bound_internal.c "librt;libwdb;libbu;${M_LIBRARY}" TEST)
 brlcad_add_test(NAME rt_bound_internal COMMAND rt_bound_internal)
+
+brlcad_addexec(rt_inmem_write inmem_write.c "librt;libwdb;libbu;${M_LIBRARY}" TEST)
+brlcad_add_test(NAME rt_inmem_write COMMAND rt_inmem_write)
+
+brlcad_addexec(rt_binunif binunif.c "librt;libwdb;libbu;${M_LIBRARY}" TEST)
+brlcad_add_test(NAME rt_binunif COMMAND rt_binunif)
 
 brlcad_addexec(rt_tree_prune tree_prune.c "librt;libwdb;libbu;${M_LIBRARY}" TEST)
 brlcad_add_test(NAME rt_tree_prune COMMAND rt_tree_prune)
 
 brlcad_addexec(rt_reprep_prune reprep_prune.c "librt;libwdb;libbu;${M_LIBRARY}" TEST)
 brlcad_add_test(NAME rt_reprep_prune COMMAND rt_reprep_prune)
+
+brlcad_addexec(rt_submodel_xform submodel_xform.c "librt;libwdb;libbu;${M_LIBRARY}" TEST)
+brlcad_add_test(NAME rt_submodel_xform COMMAND rt_submodel_xform)
 
 brlcad_addexec(rt_lcomb_large lcomb_large.c "librt;libwdb;libbu;${M_LIBRARY}" TEST)
 brlcad_add_test(NAME rt_lcomb_large COMMAND rt_lcomb_large)
@@ -106,6 +118,14 @@ brlcad_add_test(NAME rt_cache_parallel_multiple_different_objects_hierarchy_1  C
 # lod testing
 brlcad_addexec(rt_lod lod.c "librt;libbg;${M_LIBRARY}" TEST)
 
+# VDS vertex tree construction and traversal.  Compile the private VDS
+# implementation into the test because its symbols are not part of librt's ABI.
+brlcad_addexec(rt_vds_tree "vds_tree.c;../vds/vds.c" "libbu;${M_LIBRARY}" TEST)
+target_include_directories(rt_vds_tree PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vds
+)
+brlcad_add_test(NAME rt_vds_tree COMMAND rt_vds_tree)
+
 # bv_polygon <-> sketch testing
 brlcad_addexec(rt_bv_poly_sketch bv_poly_sketch.c "librt;libbv;${M_LIBRARY}" TEST)
 
@@ -121,6 +141,20 @@ brlcad_add_test(NAME rt_search_stress COMMAND rt_search_stress)
 brlcad_addexec(rt_tess_timing tess_timing.c "librt;libnmg;libwdb;libbu;${M_LIBRARY}" NO_INSTALL)
 
 brlcad_addexec(bot_match bot_match.cpp "librt;libbg;${M_LIBRARY}" TEST)
+
+brlcad_addexec(rt_bot_split
+  "bot_split.cpp;../primitives/bot/decimate_validate.cpp"
+  "librt;libbg;${M_LIBRARY}"
+  TEST
+)
+target_include_directories(rt_bot_split PRIVATE ${BRLCAD_SOURCE_DIR}/src/libbg)
+brlcad_add_test(NAME rt_bot_split COMMAND rt_bot_split)
+
+brlcad_addexec(rt_ars_inside ars_inside.c "librt;libwdb;libbu;${M_LIBRARY}" TEST)
+brlcad_add_test(NAME rt_ars_inside COMMAND rt_ars_inside)
+
+brlcad_addexec(rt_pnts_bounds pnts_bounds.c "${RT_TEST_LIBS}" TEST)
+brlcad_add_test(NAME rt_pnts_bounds COMMAND rt_pnts_bounds)
 
 # boolweave testing
 brlcad_addexec(rt_boolweave rt_boolweave.c "${RT_TEST_LIBS}" TEST)
@@ -174,11 +208,14 @@ brlcad_add_test(NAME rt_metaball_adjust COMMAND rt_metaball_adjust)
 set(
   distcheck_files
   CMakeLists.txt
+  ars_inside.c
   arb_intersect.g
   binary_attribute.c
+  binunif.c
   brep_io.cpp
   bound_internal.c
   crofton.c
+  db_name.c
   default_object.c
   datum_annot_semantics.c
   dsp_raytrace_check.c
@@ -198,9 +235,12 @@ set(
   search_stress.c
   static_init.cpp
   sketch.g
+  submodel_xform.c
   prim_tess.c
+  pnts_bounds.c
   tess_timing.c
   tree_prune.c
+  vds_tree.c
 )
 
 cmakefiles(${distcheck_files})

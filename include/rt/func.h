@@ -227,6 +227,32 @@ struct rt_crofton_params {
     double time_ms;      /**< wall-clock time budget (ms); 0 = disabled */
 };
 
+/** One solid partition observed by a Crofton ray. */
+struct rt_crofton_segment {
+    point_t in_point;
+    vect_t in_normal;
+    point_t out_point;
+    vect_t out_normal;
+    fastf_t thickness;
+    size_t ray_id;
+};
+
+/**
+ * Structured samples and estimates produced by rt_crofton_collect().
+ * Release @p segments with rt_crofton_result_free().
+ */
+struct rt_crofton_result {
+    struct rt_crofton_segment *segments;
+    size_t segment_count;
+    size_t ray_count;
+    size_t crossing_count;
+    double surface_area;
+    double volume;
+};
+
+/** Initialize an rt_crofton_result before first use. */
+#define RT_CROFTON_RESULT_INIT { NULL, 0, 0, 0, 0.0, 0.0 }
+
 
 /**
  * Run the Cauchy-Crofton ray-sampling estimator on an already-prepared
@@ -235,6 +261,12 @@ struct rt_crofton_params {
  *
  * @param out_surf_area Receives the estimated surface area (mm^2).
  * @param out_volume    Receives the estimated volume (mm^3).
+ * @param out_aabb_min  Optional sampled AABB minimum; pair with out_aabb_max.
+ * @param out_aabb_max  Optional sampled AABB maximum; pair with out_aabb_min.
+ * @param out_obb       Optional sampled OBB in ARB8 point ordering.
+ * @param out_points    Optional sampled surface points allocated with
+ *                      bu_malloc; the caller must free the returned array.
+ * @param out_point_count Number of returned points; pair with out_points.
  * @param rtip          Prepared raytrace instance (rt_prep_parallel must
  *                      have been called first).
  * @param params        Stopping criteria.  NULL or all-zero -> 2 000-ray default.
@@ -242,8 +274,14 @@ struct rt_crofton_params {
  *                      derive the sampling sphere from prepared soltab extents.
  * @param bbox_max      Optional focused sampling bbox maximum.  Pass NULL to
  *                      derive the sampling sphere from prepared soltab extents.
+ * At least one output must be requested.  All output pointers are optional
+ * except that the AABB pair and point-array/count pair must be supplied
+ * together.  Bounds and points are derived from the same converged sample set
+ * used for the surface-area estimate.
+ *
  * @return  The total number of ray-surface crossings accumulated during
- *          sampling (>= 0) on success; -1 on bad arguments.  A return
+ *          sampling (>= 0) on success; -1 on bad arguments or a requested
+ *          bound fit failure.  A return
  *          value of 0 means no geometry was intersected by the sampler.
  *
  * @section crofton_near_tol Near-tolerance sliver geometry: CSG vs BoT divergence
@@ -323,7 +361,27 @@ struct rt_crofton_params {
  * (which is insensitive to sliver SA: sliver volume is ~14 mm³ out of
  * 147 200 mm³, or 0.01%) is a far more reliable cross-check metric.
  */
-RT_EXPORT extern int rt_crofton_shoot(double *out_surf_area, double *out_volume, struct rt_i *rtip, const struct rt_crofton_params *params, const fastf_t *bbox_min, const fastf_t *bbox_max);
+RT_EXPORT extern int rt_crofton_shoot(double *out_surf_area, double *out_volume, point_t *out_aabb_min, point_t *out_aabb_max, point_t out_obb[8], point_t **out_points, size_t *out_point_count, struct rt_i *rtip, const struct rt_crofton_params *params, const fastf_t *bbox_min, const fastf_t *bbox_max);
+
+/**
+ * Run Crofton sampling while preserving oriented entry/exit pairs.
+ *
+ * @p result must be initialized with RT_CROFTON_RESULT_INIT.  On success it
+ * owns the returned segment array.  @p rtip must already be prepared.
+ * @p ray_offset skips that many samples in the deterministic sequence and
+ * labels the returned rays starting at that value.  This lets successive
+ * calls use disjoint validation streams.
+ */
+RT_EXPORT extern int rt_crofton_collect(struct rt_crofton_result *result,
+					struct rt_i *rtip,
+					const struct rt_crofton_params *params,
+					size_t ray_offset,
+					const fastf_t *bbox_min,
+					const fastf_t *bbox_max);
+
+/** Release storage owned by a structured Crofton result. */
+RT_EXPORT extern void rt_crofton_result_free(
+					struct rt_crofton_result *result);
 
 
 /**
